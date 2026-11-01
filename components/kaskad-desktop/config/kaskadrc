@@ -1,0 +1,9 @@
+[Desktops]
+Number=1
+Rows=1
+
+[KaskadDesktop]
+WorkspaceDefaultsVersion=1
+
+[Windows]
+BorderlessMaximizedWindows=false

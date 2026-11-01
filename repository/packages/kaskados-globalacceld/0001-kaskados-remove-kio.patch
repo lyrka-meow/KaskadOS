@@ -1,0 +1,124 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c91c0c5..3a5d557 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -50,7 +50,5 @@ find_package(KF6WindowSystem ${KF6_MIN_VERSION} REQUIRED)
+ find_package(KF6GlobalAccel ${KF6_MIN_VERSION} REQUIRED)
+ find_package(KF6Service ${KF6_MIN_VERSION} REQUIRED)
+-find_package(KF6KIO ${KF6_MIN_VERSION} REQUIRED)
+-find_package(KF6JobWidgets ${KF6_MIN_VERSION} REQUIRED)
+ 
+ 
+ option(WITH_X11 "Build with X11 support." ON)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 31afe98..92b68e0 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -40,8 +40,6 @@ target_link_libraries(KGlobalAccelD
+         KF6::CoreAddons   # KAboutData
+         KF6::ConfigCore
+         KF6::Service
+-        KF6::KIOGui
+-        KF6::JobWidgets
+ )
+ 
+ set_target_properties(KGlobalAccelD PROPERTIES VERSION ${KGLOBALACCELD_VERSION}
+diff --git a/src/kserviceactioncomponent.cpp b/src/kserviceactioncomponent.cpp
+index a4dbbe5..9a87e14 100644
+--- a/src/kserviceactioncomponent.cpp
++++ b/src/kserviceactioncomponent.cpp
+@@ -10,31 +10,27 @@
+ #include "globalshortcutcontext.h"
+ #include "logging.h"
+ 
+ #include <QFileInfo>
+-
+-#include <KIO/ApplicationLauncherJob>
+-#include <KIO/UntrustedProgramHandlerInterface>
+-#include <KNotificationJobUiDelegate>
++#include <QProcess>
++#include <QRegularExpression>
+ 
+ #include "config-kglobalaccel.h"
+-#if HAVE_X11
+-#include <KStartupInfo>
+-#include <private/qtx11extras_p.h>
+-#endif
+ 
+-class UntrustedProgramHandler : public KIO::UntrustedProgramHandlerInterface
++static QStringList commandFromDesktopExec(const QString &execLine)
+ {
+-public:
+-    UntrustedProgramHandler(QObject *parent)
+-        : KIO::UntrustedProgramHandlerInterface(parent)
+-    {
+-    }
+-
+-    void showUntrustedProgramWarning(KJob * /*job*/, const QString & /*programName*/) override
+-    {
+-        Q_EMIT result(true);
++    QStringList command = QProcess::splitCommand(execLine);
++    static const QRegularExpression fieldCode(QStringLiteral("%[fFuUdDnNickvm]"));
++    for (auto it = command.begin(); it != command.end();) {
++        it->replace(QStringLiteral("%%"), QStringLiteral("%"));
++        it->remove(fieldCode);
++        if (it->isEmpty()) {
++            it = command.erase(it);
++        } else {
++            ++it;
++        }
+     }
+-};
++    return command;
++}
+ 
+ QString makeUniqueName(const KService::Ptr &service)
+ {
+@@ -59,36 +59,30 @@ void KServiceActionComponent::emitGlobalShortcutEvent(const GlobalShortcut &shor
+         return;
+     }
+ 
+-    KIO::ApplicationLauncherJob *job = nullptr;
+-
++    QString execLine;
+     if (shortcut.uniqueName() == QLatin1String("_launch")) {
+-        job = new KIO::ApplicationLauncherJob(m_service);
++        execLine = m_service->exec();
+     } else {
+         const auto actions = m_service->actions();
+         const auto it = std::find_if(actions.cbegin(), actions.cend(), [&shortcut](const KServiceAction &action) {
+             return action.name() == shortcut.uniqueName();
+         });
+         if (it == actions.cend()) {
+             qCCritical(KGLOBALACCELD, "failed to find an action matching the '%s' name", qPrintable(shortcut.uniqueName()));
+             return;
+-        } else {
+-            job = new KIO::ApplicationLauncherJob(*it);
+         }
++        execLine = it->exec();
+     }
+ 
+-    auto *delegate = new KNotificationJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled);
+-    // ApplicationLauncherJob refuses to launch desktop files in /usr/share/kglobalaccel/ unless they are marked as executable
+-    // to avoid that add our own UntrustedProgramHandler that accepts the launch regardless
+-    new UntrustedProgramHandler(delegate);
+-    job->setUiDelegate(delegate);
+-#if HAVE_X11
+-    if (QX11Info::isPlatformX11()) {
+-        // Create a startup id ourselves. Otherwise ApplicationLauncherJob will query X11 to get a timestamp, which causes a deadlock
+-        auto startupId = KStartupInfo::createNewStartupIdForTimestamp(QX11Info::appTime());
+-        job->setStartupId(startupId);
++    QStringList command = commandFromDesktopExec(execLine);
++    if (command.isEmpty()) {
++        qCCritical(KGLOBALACCELD, "shortcut '%s' has no executable command", qPrintable(shortcut.uniqueName()));
++        return;
+     }
+-#endif
+-    job->start();
++    const QString program = command.takeFirst();
++    if (!QProcess::startDetached(program, command)) {
++        qCCritical(KGLOBALACCELD, "failed to start shortcut command '%s'", qPrintable(program));
++    }
+ }
+ 
+ bool KServiceActionComponent::cleanUp()

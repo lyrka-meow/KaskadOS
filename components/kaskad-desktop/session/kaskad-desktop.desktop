@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Kaskad DE
+Comment=Графическая среда Kaskad DE
+Exec=/usr/local/bin/start-kaskad-desktop
+TryExec=/usr/local/bin/start-kaskad-desktop
+Type=Application
+DesktopNames=KaskadDesktop

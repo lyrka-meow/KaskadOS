@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "product": "Kaskad DE",
+  "version": "0.1.0-alpha.78",
+  "channel": "alpha",
+  "releaseDate": "2026-10-31",
+  "releaseNotes": "releases/0.1.0-alpha.78.json",
+  "releaseUrl": "https://github.com/lyrka-meow/KaskadOS/releases",
+  "sessionRestartRequired": true,
+  "components": {
+    "compositor": "0.1.0-dev",
+    "shell": "1.6-beta",
+    "regalia": "integrated"
+  }
+}

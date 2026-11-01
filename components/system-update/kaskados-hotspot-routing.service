@@ -1,0 +1,14 @@
+[Unit]
+Description=Maintain KaskadOS shared-network routing
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/kaskados/kaskados-hotspot-control restore-routing
+TimeoutStartSec=12s
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

@@ -1,0 +1,7 @@
+[Default Applications]
+inode/directory=io.kaskados.Files.desktop
+application/x-kaskados-layout=org.kaskados.Layout.desktop
+
+[Added Associations]
+inode/directory=io.kaskados.Files.desktop;
+application/x-kaskados-layout=org.kaskados.Layout.desktop;

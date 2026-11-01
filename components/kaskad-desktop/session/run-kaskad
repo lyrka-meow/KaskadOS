@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root=${KASKAD_DESKTOP_ROOT:?KASKAD_DESKTOP_ROOT is not set}
+backend="$repo_root/shell/KaskadShell/core/bin/kaskad-shell"
+shell_dir="$repo_root/shell/KaskadShell/quickshell"
+portal="$repo_root/build/portal/bin/xdg-desktop-portal-kaskad"
+
+if [[ ! -x "$backend" ]]; then
+    echo "run-kaskad: missing $backend; run make dev in the shell core" >&2
+    exit 1
+fi
+
+if [[ ! -f "$shell_dir/shell.qml" ]]; then
+    echo "run-kaskad: missing $shell_dir/shell.qml" >&2
+    exit 1
+fi
+
+if [[ ! -x "$portal" ]]; then
+    echo "run-kaskad: missing $portal; build the Kaskad portal first" >&2
+    exit 1
+fi
+
+export QT_NO_XDG_DESKTOP_PORTAL=1
+
+if [[ -z ${XDG_RUNTIME_DIR:-} || -z ${WAYLAND_DISPLAY:-} ]]; then
+    echo "run-kaskad: XDG_RUNTIME_DIR or WAYLAND_DISPLAY is unavailable" >&2
+    exit 1
+fi
+
+wayland_socket="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+for _ in $(seq 1 100); do
+    [[ -S "$wayland_socket" ]] && break
+    sleep 0.1
+done
+
+if [[ ! -S "$wayland_socket" ]]; then
+    echo "run-kaskad: Wayland socket did not become ready: $wayland_socket" >&2
+    exit 1
+fi
+
+dbus-update-activation-environment --systemd \
+    WAYLAND_DISPLAY \
+    XDG_CURRENT_DESKTOP \
+    XDG_SESSION_DESKTOP \
+    XDG_SESSION_TYPE \
+    QT_QPA_PLATFORM
+
+portal_property_is()
+{
+    local bus_name=$1
+    local interface=$2
+    local property=$3
+    local expected=$4
+    local value
+
+    value=$(busctl --user get-property \
+        "$bus_name" \
+        /org/freedesktop/portal/desktop \
+        "$interface" \
+        "$property" 2>/dev/null) || return 1
+    [[ $value == "u $expected" ]]
+}
+
+wait_for_portal_property()
+{
+    local bus_name=$1
+    local interface=$2
+    local property=$3
+    local expected=$4
+
+    for _ in $(seq 1 100); do
+        if portal_property_is "$bus_name" "$interface" "$property" "$expected"; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# xdg-desktop-portal caches the interfaces exported by its backend.  Starting
+# it while the compositor socket is still unavailable leaves ScreenCast at
+# version 0 for the rest of the login session, so applications such as Discord
+# never send a share request.  Bring the backend up and validate it first.
+systemctl --user stop xdg-desktop-portal.service
+systemctl --user reset-failed xdg-desktop-portal-kaskad.service 2>/dev/null || true
+systemctl --user restart xdg-desktop-portal-kaskad.service
+
+if ! wait_for_portal_property \
+    org.freedesktop.impl.portal.desktop.kaskad \
+    org.freedesktop.impl.portal.ScreenCast \
+    version 4; then
+    echo "run-kaskad: Kaskad ScreenCast backend did not become ready" >&2
+    systemctl --user --no-pager status xdg-desktop-portal-kaskad.service >&2 || true
+    exit 1
+fi
+
+systemctl --user restart xdg-desktop-portal.service
+
+for property in version AvailableSourceTypes AvailableCursorModes; do
+    expected=7
+    [[ $property == version ]] && expected=4
+    if ! wait_for_portal_property \
+        org.freedesktop.portal.Desktop \
+        org.freedesktop.portal.ScreenCast \
+        "$property" "$expected"; then
+        echo "run-kaskad: public ScreenCast portal has invalid $property" >&2
+        systemctl --user --no-pager status xdg-desktop-portal.service >&2 || true
+        exit 1
+    fi
+done
+
+exec "$backend" run -c "$shell_dir"

@@ -1,0 +1,7 @@
+[templates.kaskadShellneovim-colors]
+input_path = 'SHELL_DIR/matugen/templates/neovim-colors.lua'
+output_path = 'CONFIG_DIR/nvim/colors/kaskad-shell.lua'
+
+[templates.kaskadShellneovim-lualine]
+input_path = 'SHELL_DIR/matugen/templates/neovim-lualine.lua'
+output_path = 'CONFIG_DIR/nvim/lua/lualine/themes/kaskad-shell.lua'

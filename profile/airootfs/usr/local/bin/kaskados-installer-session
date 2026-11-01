@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -u
+
+readonly compositor='/opt/kaskados-installer/bin/kaskad-installer'
+readonly session='/usr/local/bin/kaskados-run-calamares'
+readonly defaults='/usr/share/kaskados-installer/config'
+readonly session_root='/run/kaskados-installer'
+
+prepare_internal_backlights()
+{
+    local device_path device_name current maximum
+
+    for device_path in /sys/class/backlight/*; do
+        [[ -d "${device_path}" ]] || continue
+        device_name=${device_path##*/}
+        read -r current < "${device_path}/brightness" || continue
+        read -r maximum < "${device_path}/max_brightness" || continue
+
+        [[ "${current}" =~ ^[0-9]+$ && "${maximum}" =~ ^[0-9]+$ ]] || continue
+        (( maximum > 0 && current < maximum )) || continue
+
+        brightnessctl --quiet --class=backlight --device="${device_name}" set 100% \
+            || printf 'KaskadOS: не удалось увеличить яркость %s.\n' "${device_name}" >&2
+    done
+}
+
+if [[ ! -x "${compositor}" || ! -x "${session}" ]]; then
+    printf 'KaskadOS: компоненты live-установщика не найдены.\n' >&2
+    sleep 10
+    exit 127
+fi
+
+install -d -m 0700 "${session_root}" "${session_root}/config"
+install -m 0600 "${defaults}/kaskadinstallerrc" "${session_root}/config/kaskadinstallerrc"
+install -m 0600 "${defaults}/kaskadinstallerrulesrc" "${session_root}/config/kaskadinstallerrulesrc"
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
+install -d -m 0700 "${XDG_RUNTIME_DIR}"
+export XDG_CONFIG_HOME="${session_root}/config"
+export XDG_CACHE_HOME="${session_root}/cache"
+export XDG_CURRENT_DESKTOP='KaskadOS-Installer'
+export XDG_SESSION_DESKTOP='KaskadOS-Installer'
+export XDG_SESSION_TYPE='wayland'
+unset LC_ALL
+export LANG='ru_RU.UTF-8'
+export LANGUAGE='ru_RU:ru'
+export QT_QPA_PLATFORM='wayland'
+export QT_WAYLAND_DISABLE_WINDOWDECORATION='1'
+export XCURSOR_THEME='KaskadCursorBase'
+export XCURSOR_SIZE='24'
+export XCURSOR_PATH="$HOME/.local/share/icons:$HOME/.icons:/usr/local/share/icons:/usr/share/icons:/run/host/user-share/icons:/run/host/share/icons"
+export LD_LIBRARY_PATH='/opt/kaskados-installer/bin'
+export PATH="/opt/kaskados-installer/bin:${PATH}"
+
+unset DISPLAY WAYLAND_DISPLAY
+
+# The installer must be readable immediately after boot. This is a one-shot
+# live-session adjustment for built-in displays; external DDC displays and the
+# installed system's user preferences are intentionally left untouched.
+prepare_internal_backlights
+
+exec dbus-run-session -- "${compositor}" \
+    --drm \
+    --socket kaskados-installer-0 \
+    --lock \
+    --no-global-shortcuts \
+    --exit-with-session "${session}"

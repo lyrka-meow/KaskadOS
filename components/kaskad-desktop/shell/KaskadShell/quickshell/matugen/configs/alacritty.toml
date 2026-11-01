@@ -1,0 +1,3 @@
+[templates.kaskadShellalacritty]
+input_path = 'SHELL_DIR/matugen/templates/alacritty.toml'
+output_path = 'CONFIG_DIR/alacritty/kaskad-theme.toml'

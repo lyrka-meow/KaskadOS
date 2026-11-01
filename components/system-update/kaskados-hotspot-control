@@ -1,0 +1,414 @@
+#!/usr/bin/bash
+
+set -Eeuo pipefail
+
+action=${1:-}
+iface=${2:-}
+mac=${3:-}
+ssid_encoded=${4:-}
+password_encoded=${5:-}
+channel=${6:-}
+band=${7:-}
+
+valid_iface() {
+    [[ "$1" =~ ^[a-zA-Z0-9_.:-]{1,15}$ ]]
+}
+
+write_hotspot_status() {
+    printf '%s\n%s\n' "$1" "$2" > /run/kaskados-hotspot.status.tmp
+    /usr/bin/chmod 0644 /run/kaskados-hotspot.status.tmp
+    /usr/bin/mv -f /run/kaskados-hotspot.status.tmp /run/kaskados-hotspot.status
+}
+
+repeater_process_alive() {
+    local service=$1 pid
+    [[ -f "/run/kaskados-hotspot/${service}.pid" ]] || return 1
+    pid=$(< "/run/kaskados-hotspot/${service}.pid")
+    [[ "${pid}" =~ ^[0-9]+$ && "${pid}" -gt 1 ]] || return 1
+    [[ -r "/proc/${pid}/comm" ]] || return 1
+    [[ "$(< "/proc/${pid}/comm")" == "${service}" ]] || return 1
+    /usr/bin/grep -zFq '/run/kaskados-hotspot/' "/proc/${pid}/cmdline"
+}
+
+stop_repeater_process() {
+    local service=$1
+    # A stale PID must never stop an unrelated process after PID reuse.
+    if repeater_process_alive "${service}"; then
+        /usr/bin/kill "$(< "/run/kaskados-hotspot/${service}.pid")" 2>/dev/null || true
+    fi
+}
+
+cleanup_repeater() {
+    stop_repeater_process dnsmasq
+    stop_repeater_process hostapd
+    /usr/bin/nft -f - <<'RULES' || true
+destroy table ip kaskados_repeater_nat
+destroy table inet kaskados_repeater_filter
+RULES
+    [[ ! -e /sys/class/net/kaskad-ap ]] || /usr/bin/iw dev kaskad-ap del 2>/dev/null || true
+    /usr/bin/rm -rf /run/kaskados-hotspot
+}
+
+hotspot_subnet_overlaps() {
+    local cidr=$1 address prefix a b c d mask number
+    [[ "${cidr}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]] || return 1
+    address=${cidr%/*}
+    prefix=32
+    [[ "${cidr}" != */* ]] || prefix=${cidr#*/}
+    prefix=$((10#${prefix}))
+    # A default route is the upstream, not a competing local subnet.
+    [[ "${prefix}" -gt 0 && "${prefix}" -le 32 ]] || return 1
+    IFS=. read -r a b c d <<< "${address}"
+    a=$((10#${a})); b=$((10#${b})); c=$((10#${c})); d=$((10#${d}))
+    [[ "${a}" -le 255 && "${b}" -le 255 && "${c}" -le 255 && "${d}" -le 255 ]] || return 1
+    # Compare the shorter prefix to cover both narrower and broader routes.
+    [[ "${prefix}" -le 24 ]] || prefix=24
+    mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff ))
+    number=$(( (a << 24) | (b << 16) | (c << 8) | d ))
+    [[ $((number & mask)) -eq $((0x0a2a0000 & mask)) ]]
+}
+
+check_hotspot_subnet() {
+    local address line device route addresses routes
+    addresses=$(/usr/bin/ip -o -4 addr show) || return 1
+    routes=$(/usr/bin/ip -4 route show table main) || return 1
+    while read -r _ device _ address _; do
+        [[ "${device%%@*}" == kaskad-ap ]] && continue
+        if hotspot_subnet_overlaps "${address}"; then
+            echo "Сеть раздачи 10.42.0.0/24 уже используется интерфейсом ${device}. Измените адрес конфликтующего подключения." >&2
+            return 1
+        fi
+    done <<< "${addresses}"
+    while IFS= read -r line; do
+        [[ " ${line} " == *" dev kaskad-ap "* ]] && continue
+        read -r route _ <<< "${line}"
+        if hotspot_subnet_overlaps "${route}"; then
+            echo "Сеть раздачи 10.42.0.0/24 пересекается с маршрутом ${route}. Измените адрес конфликтующего подключения." >&2
+            return 1
+        fi
+    done <<< "${routes}"
+}
+
+ensure_repeater_routing() {
+    local nat filter
+    nat=$(/usr/bin/nft list table ip kaskados_repeater_nat 2>/dev/null) || nat=''
+    filter=$(/usr/bin/nft list table inet kaskados_repeater_filter 2>/dev/null) || filter=''
+    if [[ "${nat}" != *'comment "kaskados-hotspot-nat-v1"'* ||
+          "${filter}" != *'comment "kaskados-hotspot-out-v1"'* ||
+          "${filter}" != *'comment "kaskados-hotspot-return-v1"'* ]]; then
+        # One transaction touches only our own tables; a failed replacement
+        # preserves the old rules. Match the incoming interface as well as its
+        # subnet so another interface's traffic can never inherit this NAT.
+        /usr/bin/nft -f - <<'RULES' || return 1
+destroy table ip kaskados_repeater_nat
+destroy table inet kaskados_repeater_filter
+table ip kaskados_repeater_nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        iifname "kaskad-ap" ip saddr 10.42.0.0/24 oifname != "kaskad-ap" masquerade comment "kaskados-hotspot-nat-v1"
+    }
+}
+table inet kaskados_repeater_filter {
+    chain forward {
+        type filter hook forward priority -5; policy accept;
+        iifname "kaskad-ap" accept comment "kaskados-hotspot-out-v1"
+        oifname "kaskad-ap" ct state established,related accept comment "kaskados-hotspot-return-v1"
+    }
+}
+RULES
+    fi
+    if [[ "$(< /proc/sys/net/ipv4/ip_forward)" != 1 ]]; then
+        /usr/bin/sysctl -q -w net.ipv4.ip_forward=1 || return 1
+    fi
+}
+
+regalia_vpn_ready() {
+    /usr/bin/ip link show dev regalia0 | /usr/bin/grep -Fq 'UP'
+    /usr/bin/ip rule show | /usr/bin/grep -Eq 'fwmark 0x0*2023.*lookup 2022'
+    /usr/bin/ip -4 route show table 2022 | /usr/bin/grep -Fq 'dev regalia0'
+}
+
+ensure_ethernet_vpn_routing() {
+    local ethernet_iface=$1 require_ready=${2:-false} rules
+    valid_iface "${ethernet_iface}" || return 64
+    /usr/bin/ip link show dev "${ethernet_iface}" >/dev/null 2>&1 || {
+        echo "Ethernet-интерфейс не найден" >&2
+        return 64
+    }
+    [[ ! -d "/sys/class/net/${ethernet_iface}/wireless" ]] || {
+        echo "Указан не Ethernet-интерфейс" >&2
+        return 64
+    }
+    if [[ "${require_ready}" == true ]] && ! regalia_vpn_ready; then
+        echo "Сначала подключите Regalia VPN — прямой выход в интернет для подключённого компьютера запрещён." >&2
+        return 69
+    fi
+
+    rules=$(/usr/bin/nft list table inet kaskados_ethernet_vpn 2>/dev/null) || rules=''
+    if [[ "${rules}" != *'comment "kaskados-ethernet-vpn-mark-v1"'* ||
+          "${rules}" != *'comment "kaskados-ethernet-vpn-killswitch-v1"'* ||
+          "${rules}" != *"iifname \"${ethernet_iface}\""* ]]; then
+        # Mark before the first route lookup. The dedicated policy rule owned
+        # by Regalia then selects table 2022 and regalia0. The forward hook is
+        # intentionally fail-closed: if the TUN or its routes disappear, the
+        # packet may fall through to the Wi-Fi default route, but it is dropped
+        # here instead of leaking outside the VPN.
+        /usr/bin/nft -f - <<RULES || return 1
+destroy table inet kaskados_ethernet_vpn
+table inet kaskados_ethernet_vpn {
+    chain prerouting {
+        type filter hook prerouting priority mangle; policy accept;
+        iifname "${ethernet_iface}" ip saddr 10.42.0.0/24 meta mark set 0x2023 ct mark set meta mark comment "kaskados-ethernet-vpn-mark-v1"
+    }
+    chain forward_guard {
+        type filter hook forward priority mangle; policy accept;
+        iifname "${ethernet_iface}" ip saddr 10.42.0.0/24 oifname != "regalia0" drop comment "kaskados-ethernet-vpn-killswitch-v1"
+    }
+}
+RULES
+    fi
+    if [[ "$(< /proc/sys/net/ipv4/ip_forward)" != 1 ]]; then
+        /usr/bin/sysctl -q -w net.ipv4.ip_forward=1 || return 1
+    fi
+}
+
+remove_ethernet_vpn_routing() {
+    /usr/bin/nft delete table inet kaskados_ethernet_vpn 2>/dev/null || true
+    /usr/bin/rm -rf /run/kaskados-ethernet-vpn
+}
+
+update_routing_timer() {
+    if [[ -f /run/kaskados-hotspot/active || -f /run/kaskados-ethernet-vpn/active ]]; then
+        /usr/bin/systemctl start kaskados-hotspot-routing.timer
+    else
+        /usr/bin/systemctl stop kaskados-hotspot-routing.timer
+    fi
+}
+
+case "${action}" in
+    start-repeater|stop-repeater|start-ethernet-vpn|stop-ethernet-vpn|restore-routing)
+        exec 9>/run/kaskados-hotspot.lock
+        /usr/bin/flock -w 10 9 || exit 75
+        ;;
+esac
+
+prepare_analytics_log() {
+    local owner_uid owner_gid
+    owner_uid=${PKEXEC_UID:-0}
+    [[ "${owner_uid}" =~ ^[0-9]+$ ]] || owner_uid=0
+    owner_gid=$(/usr/bin/id -g "${owner_uid}")
+    /usr/bin/install -o "${owner_uid}" -g "${owner_gid}" -m 0600 \
+        /dev/null /run/kaskados-hotspot-queries.log
+}
+
+grant_analytics_log_access() {
+    local owner_uid owner_gid
+    owner_uid=${PKEXEC_UID:-0}
+    [[ "${owner_uid}" =~ ^[0-9]+$ ]] || owner_uid=0
+    owner_gid=$(/usr/bin/id -g "${owner_uid}")
+    if [[ -f /run/kaskados-hotspot-queries.log ]]; then
+        /usr/bin/chgrp "${owner_gid}" /run/kaskados-hotspot-queries.log
+        /usr/bin/chmod 0640 /run/kaskados-hotspot-queries.log
+    fi
+}
+
+ensure_firewall() {
+    /usr/bin/nft list table inet kaskados_hotspot >/dev/null 2>&1 || \
+        /usr/bin/nft add table inet kaskados_hotspot
+    /usr/bin/nft list set inet kaskados_hotspot blocked_macs >/dev/null 2>&1 || \
+        /usr/bin/nft 'add set inet kaskados_hotspot blocked_macs { type ether_addr; }'
+    /usr/bin/nft list chain inet kaskados_hotspot forward >/dev/null 2>&1 || \
+        /usr/bin/nft 'add chain inet kaskados_hotspot forward { type filter hook forward priority -10; policy accept; }'
+    /usr/bin/nft list chain inet kaskados_hotspot input >/dev/null 2>&1 || \
+        /usr/bin/nft 'add chain inet kaskados_hotspot input { type filter hook input priority -10; policy accept; }'
+    if ! /usr/bin/nft -a list chain inet kaskados_hotspot forward | /usr/bin/grep -Fq "iifname \"${iface}\" ether saddr @blocked_macs drop"; then
+        /usr/bin/nft add rule inet kaskados_hotspot forward iifname "${iface}" ether saddr @blocked_macs drop
+    fi
+    if ! /usr/bin/nft -a list chain inet kaskados_hotspot input | /usr/bin/grep -Fq "iifname \"${iface}\" ether saddr @blocked_macs drop"; then
+        /usr/bin/nft add rule inet kaskados_hotspot input iifname "${iface}" ether saddr @blocked_macs drop
+    fi
+}
+
+case "${action}" in
+    prepare-analytics-log)
+        # A new NetworkManager-owned AP must not inherit an earlier external
+        # repeater failure after the watchdog has cleaned that repeater up.
+        [[ -d /run/kaskados-hotspot ]] || write_hotspot_status stopped ""
+        prepare_analytics_log
+        exit 0
+        ;;
+    reset-analytics-log)
+        prepare_analytics_log
+        exit 0
+        ;;
+    grant-analytics-log)
+        grant_analytics_log_access
+        exit 0
+        ;;
+    disconnect|block|unblock)
+        valid_iface "${iface}" || exit 64
+        [[ "${mac}" =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]] || exit 64
+        if [[ "${action}" != unblock && ! -d "/sys/class/net/${iface}/wireless" ]]; then
+            echo "Указан не Wi-Fi-интерфейс" >&2
+            exit 64
+        fi
+        ;;
+    create-interface)
+        child=${mac}
+        valid_iface "${iface}" || exit 64
+        [[ "${child}" == "kaskad-ap" ]] || exit 64
+        [[ -d "/sys/class/net/${iface}/wireless" ]] || {
+            echo "Указан не Wi-Fi-интерфейс" >&2
+            exit 64
+        }
+        if [[ -e "/sys/class/net/${child}" ]]; then
+            exit 0
+        fi
+        # NetworkManager first attaches wpa_supplicant to a managed netdev and
+        # switches it to AP mode while activating the hotspot profile. Creating
+        # it as __ap here makes wpa_supplicant reject the interface.
+        /usr/bin/iw dev "${iface}" interface add "${child}" type managed
+        parent_mac=$(/usr/bin/cat "/sys/class/net/${iface}/address")
+        first_octet=${parent_mac%%:*}
+        printf -v local_octet '%02x' "$((16#${first_octet} ^ 2))"
+        /usr/bin/ip link set dev "${child}" address "${local_octet}:${parent_mac#*:}"
+        exit 0
+        ;;
+    start-repeater)
+        child=${mac}
+        valid_iface "${iface}" || exit 64
+        [[ "${child}" == "kaskad-ap" ]] || exit 64
+        [[ "${channel}" =~ ^[0-9]{1,3}$ ]] || exit 64
+        [[ "${band}" == "g" || "${band}" == "a" ]] || exit 64
+        [[ -d "/sys/class/net/${iface}/wireless" ]] || exit 64
+        check_hotspot_subnet || exit 65
+        cleanup_failed_repeater() {
+            cleanup_repeater
+            write_hotspot_status degraded "Не удалось запустить раздачу. Попробуйте включить её ещё раз."
+        }
+        trap cleanup_failed_repeater ERR
+        ssid=$(printf '%s' "${ssid_encoded}" | /usr/bin/base64 -d) || exit 64
+        password=$(printf '%s' "${password_encoded}" | /usr/bin/base64 -d) || exit 64
+        [[ -n "${ssid}" && ! "${ssid}" =~ [[:cntrl:]] ]] || exit 64
+        if [[ -n "${password}" ]]; then
+            [[ ${#password} -ge 8 && ! "${password}" =~ [[:cntrl:]] ]] || exit 64
+        fi
+
+        # The backend runs as the desktop user and must be able to read the
+        # non-secret active/PID markers. The hostapd config itself stays 0600.
+        /usr/bin/install -d -m 0755 /run/kaskados-hotspot
+        write_hotspot_status starting "Раздача запускается…"
+        stop_repeater_process hostapd
+        stop_repeater_process dnsmasq
+        [[ ! -e "/sys/class/net/${child}" ]] || /usr/bin/iw dev "${child}" del
+        /usr/bin/nmcli general reload conf
+        /usr/bin/iw dev "${iface}" interface add "${child}" type __ap
+
+        {
+            printf 'interface=%s\ndriver=nl80211\nssid=%s\nhw_mode=%s\nchannel=%s\ncountry_code=RU\nieee80211n=1\nwmm_enabled=1\n' "${child}" "${ssid}" "${band}" "${channel}"
+            if [[ -n "${password}" ]]; then
+                printf 'wpa=2\nwpa_key_mgmt=WPA-PSK\nrsn_pairwise=CCMP\nwpa_passphrase=%s\n' "${password}"
+            fi
+        } > /run/kaskados-hotspot/hostapd.conf
+        /usr/bin/chmod 0600 /run/kaskados-hotspot/hostapd.conf
+        /usr/bin/hostapd -B -P /run/kaskados-hotspot/hostapd.pid /run/kaskados-hotspot/hostapd.conf 9>&-
+        /usr/bin/ip addr replace 10.42.0.1/24 dev "${child}"
+        /usr/bin/ip link set dev "${child}" up
+        prepare_analytics_log
+        /usr/bin/dnsmasq --conf-file=/dev/null --interface="${child}" --bind-dynamic \
+            --dhcp-range=10.42.0.10,10.42.0.250,255.255.255.0,12h \
+            --dhcp-option=3,10.42.0.1 --dhcp-option=6,10.42.0.1 \
+            --dhcp-leasefile=/run/kaskados-hotspot/dnsmasq.leases \
+            --log-queries=extra --log-async=25 \
+            --log-facility=/run/kaskados-hotspot-queries.log \
+            --pid-file=/run/kaskados-hotspot/dnsmasq.pid 9>&-
+        grant_analytics_log_access
+        /usr/bin/chmod 0644 /run/kaskados-hotspot/hostapd.pid /run/kaskados-hotspot/dnsmasq.pid
+        ensure_repeater_routing
+        printf '%s\n' "${child}" > /run/kaskados-hotspot/active
+        /usr/bin/chmod 0644 /run/kaskados-hotspot/active
+        update_routing_timer
+        write_hotspot_status active ""
+        trap - ERR
+        exit 0
+        ;;
+    stop-repeater)
+        [[ "${iface}" == "kaskad-ap" ]] || exit 64
+        cleanup_repeater
+        write_hotspot_status stopped ""
+        update_routing_timer
+        exit 0
+        ;;
+    start-ethernet-vpn)
+        valid_iface "${iface}" || exit 64
+        ensure_ethernet_vpn_routing "${iface}" true
+        /usr/bin/install -d -m 0755 /run/kaskados-ethernet-vpn
+        printf '%s\n' "${iface}" > /run/kaskados-ethernet-vpn/active
+        /usr/bin/chmod 0644 /run/kaskados-ethernet-vpn/active
+        update_routing_timer
+        exit 0
+        ;;
+    stop-ethernet-vpn)
+        if [[ -n "${iface}" ]]; then
+            valid_iface "${iface}" || exit 64
+        fi
+        remove_ethernet_vpn_routing
+        update_routing_timer
+        exit 0
+        ;;
+    restore-routing)
+        restore_failed=false
+        if [[ -f /run/kaskados-hotspot/active ]]; then
+            [[ "$(< /run/kaskados-hotspot/active)" == kaskad-ap ]] || exit 64
+            if ! repeater_process_alive hostapd || ! repeater_process_alive dnsmasq || [[ ! -e /sys/class/net/kaskad-ap ]]; then
+                cleanup_repeater
+                write_hotspot_status degraded "Раздача остановилась. Включите её ещё раз."
+            elif ! check_hotspot_subnet; then
+                cleanup_repeater
+                write_hotspot_status degraded "Адрес раздачи конфликтует с другим подключением. Проверьте настройки IPv4."
+            elif ! /usr/bin/ip -o -4 addr show dev kaskad-ap | /usr/bin/grep -Fq ' inet 10.42.0.1/24 '; then
+                write_hotspot_status degraded "У точки доступа пропал IPv4-адрес. Выключите и включите раздачу."
+                restore_failed=true
+            elif ! ensure_repeater_routing; then
+                write_hotspot_status degraded "Не удалось восстановить передачу интернета. Повторная попытка — через 15 секунд."
+                restore_failed=true
+            else
+                write_hotspot_status active ""
+            fi
+        fi
+        if [[ -f /run/kaskados-ethernet-vpn/active ]]; then
+            ethernet_iface=$(< /run/kaskados-ethernet-vpn/active)
+            if ! ensure_ethernet_vpn_routing "${ethernet_iface}" false; then
+                restore_failed=true
+            fi
+        fi
+        "${restore_failed}" && exit 1
+        exit 0
+        ;;
+    delete-interface)
+        [[ "${iface}" == "kaskad-ap" ]] || exit 64
+        if [[ -e "/sys/class/net/${iface}" ]]; then
+            /usr/bin/iw dev "${iface}" del
+        fi
+        exit 0
+        ;;
+    *)
+        exit 64
+        ;;
+esac
+
+case "${action}" in
+    disconnect)
+        /usr/bin/iw dev "${iface}" station del "${mac}"
+        ;;
+    block)
+        ensure_firewall
+        /usr/bin/nft add element inet kaskados_hotspot blocked_macs "{ ${mac} }" 2>/dev/null || true
+        /usr/bin/iw dev "${iface}" station del "${mac}" 2>/dev/null || true
+        ;;
+    unblock)
+        if /usr/bin/nft list set inet kaskados_hotspot blocked_macs >/dev/null 2>&1; then
+            /usr/bin/nft delete element inet kaskados_hotspot blocked_macs "{ ${mac} }" 2>/dev/null || true
+        fi
+        ;;
+esac

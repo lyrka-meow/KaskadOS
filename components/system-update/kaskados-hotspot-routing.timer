@@ -1,0 +1,8 @@
+[Unit]
+Description=Check KaskadOS hotspot forwarding while sharing
+
+[Timer]
+OnActiveSec=15s
+OnUnitActiveSec=15s
+AccuracySec=1s
+Unit=kaskados-hotspot-routing.service

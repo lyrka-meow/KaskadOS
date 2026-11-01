@@ -1,0 +1,36 @@
+_enable_bluetooth_once() {
+  local state_dir='/var/lib/kaskados'
+  local marker="${state_dir}/bluetooth-default-applied"
+
+  [[ -e "${marker}" ]] && return 0
+
+  install -d -m 0755 "${state_dir}"
+  if systemctl enable bluetooth.service >/dev/null 2>&1; then
+    touch "${marker}"
+    systemctl start bluetooth.service >/dev/null 2>&1 || true
+  fi
+}
+
+_reload_input_access() {
+  udevadm control --reload-rules >/dev/null 2>&1 || true
+  udevadm trigger --subsystem-match=input --action=change >/dev/null 2>&1 || true
+}
+
+post_install() {
+  _enable_bluetooth_once
+  _reload_input_access
+  update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+}
+
+post_upgrade() {
+  _enable_bluetooth_once
+  _reload_input_access
+  update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+}
+
+post_remove() {
+  update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+}

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Заметки Kaskad
+GenericName=Text Editor
+Comment=Заметки и текстовые файлы в KaskadOS
+Exec=kaskad-shell ipc call notepad openFile %f
+Icon=kaskadlogo
+Terminal=false
+NoDisplay=true
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;
+StartupNotify=false

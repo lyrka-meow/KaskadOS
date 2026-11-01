@@ -1,0 +1,73 @@
+pkgname=kaskados-globalacceld
+pkgver=6.7.5
+pkgrel=2
+pkgdesc='Встроенный движок глобальных сочетаний KaskadOS без KIO и KDE Wallet'
+arch=('x86_64')
+url='https://github.com/lyrka-meow/KaskadOS'
+license=('LGPL-2.0-or-later')
+provides=("kglobalacceld=${pkgver}")
+conflicts=('kglobalacceld')
+replaces=('kglobalacceld')
+depends=(
+  'glibc'
+  'kconfig'
+  'kcoreaddons'
+  'kcrash'
+  'kdbusaddons'
+  'kglobalaccel'
+  'kservice'
+  'kwindowsystem'
+  'libstdc++'
+  'libx11'
+  'libxcb'
+  'qt6-base'
+  'xcb-util-keysyms'
+)
+makedepends=('dbus' 'extra-cmake-modules')
+source=(
+  "https://download.kde.org/stable/plasma/${pkgver}/kglobalacceld-${pkgver}.tar.xz"
+  '0001-kaskados-remove-kio.patch'
+)
+sha256sums=(
+  '83e9a4e226e695fe1544cfa19a9659c5f1000be46c669fe3a9e299029c6c2abf'
+  'SKIP'
+)
+
+prepare() {
+  patch -d "kglobalacceld-${pkgver}" -Np1 -i "${srcdir}/0001-kaskados-remove-kio.patch"
+}
+
+build() {
+  cmake -S "kglobalacceld-${pkgver}" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_TESTING=ON \
+    -DWITH_X11=ON
+  cmake --build build
+}
+
+check() {
+  local test_home
+  test_home="$(mktemp -d "${srcdir}/test-home.XXXXXX")"
+  dbus-run-session -- env \
+    HOME="${test_home}" \
+    XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_DATA_HOME="${test_home}/share" \
+    XDG_CACHE_HOME="${test_home}/cache" \
+    XDG_CURRENT_DESKTOP=KDE \
+    XDG_SESSION_DESKTOP=KDE \
+    KDE_FULL_SESSION=true \
+    QT_QPA_PLATFORM=offscreen \
+    ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="${pkgdir}" cmake --install build
+
+  # Kaskad embeds the engine as a library. KaskadOS must not start a second
+  # desktop-wide daemon or install its X11 platform plugin behind the shell.
+  rm -f "${pkgdir}/usr/lib/libexec/kglobalacceld"
+  rm -f "${pkgdir}/usr/lib/systemd/user/plasma-kglobalaccel.service"
+  rm -f "${pkgdir}/etc/xdg/autostart/kglobalacceld.desktop"
+  rm -rf "${pkgdir}/usr/lib/qt6/plugins/org.kde.kglobalacceld.platforms"
+}

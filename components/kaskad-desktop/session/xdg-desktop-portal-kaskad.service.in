@@ -1,0 +1,12 @@
+[Unit]
+Description=Kaskad Portal
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+Type=dbus
+ExecStart=@KASKAD_PORTAL_EXECUTABLE@
+BusName=org.freedesktop.impl.portal.desktop.kaskad
+Environment=QT_NO_XDG_DESKTOP_PORTAL=1
+Slice=session.slice
+Restart=no

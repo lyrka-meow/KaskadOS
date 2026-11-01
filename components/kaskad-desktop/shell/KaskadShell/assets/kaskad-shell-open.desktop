@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Kaskad Shell
+Comment=Выбор приложения для открытия ссылок и файлов
+Exec=kaskad-shell open %u
+Icon=kaskadlogo
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/kaskad-shell;text/html;application/xhtml+xml;
+Categories=Utility;

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root=${1:?usage: prepare-user-config REPO_ROOT [CONFIG_DIR]}
+user_config_dir=${2:-${XDG_CONFIG_HOME:-$HOME/.config}}
+kaskad_config="$user_config_dir/kaskadrc"
+
+mkdir -p "$user_config_dir"
+
+if [[ ! -f "$kaskad_config" ]]; then
+    cp "$repo_root/config/kaskadrc" "$kaskad_config"
+fi
+if [[ ! -f "$user_config_dir/kaskadglobals" ]]; then
+    cp "$repo_root/config/kaskadglobals" "$user_config_dir/kaskadglobals"
+fi
+
+# WorkspaceDefaultsVersion=2 switches from a fixed desktop count to the
+# GNOME-style dynamic workspace manager provided by the shell.
+if command -v kreadconfig6 >/dev/null && command -v kwriteconfig6 >/dev/null; then
+    # KaskadOS does not use KDE Wallet as its secrets backend. KIO currently
+    # pulls the kwallet package in as a library dependency, so explicitly keep
+    # its daemon disabled until the remaining KIO-based file picker is replaced
+    # by the native KaskadOS implementation. This also prevents kwalletd from
+    # showing its first-run wizard when an application probes Secret Service.
+    kwriteconfig6 \
+        --file "$user_config_dir/kwalletrc" \
+        --group Wallet \
+        --key Enabled false
+    kwriteconfig6 \
+        --file "$user_config_dir/kwalletrc" \
+        --group Wallet \
+        --key "First Use" false
+
+    defaults_version=$(
+        kreadconfig6 \
+            --file "$kaskad_config" \
+            --group KaskadDesktop \
+            --key WorkspaceDefaultsVersion \
+            --default 0
+    )
+    [[ "$defaults_version" =~ ^[0-9]+$ ]] || defaults_version=0
+
+    if (( defaults_version < 2 )); then
+        desktop_count=$(
+            kreadconfig6 \
+                --file "$kaskad_config" \
+                --group Desktops \
+                --key Number \
+                --default 1
+        )
+        [[ "$desktop_count" =~ ^[0-9]+$ ]] || desktop_count=1
+
+        if (( desktop_count == 5 || desktop_count <= 1 )); then
+            kwriteconfig6 \
+                --file "$kaskad_config" \
+                --group Desktops \
+                --key Number 1
+            kwriteconfig6 \
+                --file "$kaskad_config" \
+                --group Desktops \
+                --key Rows 1
+        fi
+
+        kwriteconfig6 \
+            --file "$kaskad_config" \
+            --group KaskadDesktop \
+            --key WorkspaceDefaultsVersion 2
+    fi
+
+    shortcuts_file="$user_config_dir/kglobalshortcutsrc"
+    for desktop in {1..9}; do
+        kwriteconfig6 \
+            --file "$shortcuts_file" \
+            --group kwin \
+            --key "Switch to Desktop $desktop" \
+            "Meta+$desktop,Meta+$desktop,Переключиться на рабочий стол $desktop"
+    done
+fi

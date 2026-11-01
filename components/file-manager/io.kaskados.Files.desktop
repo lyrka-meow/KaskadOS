@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Файлы
+Comment=Работа с файлами и папками
+Exec=kaskad-shell files open %f
+Icon=/opt/kaskad-desktop/shell/KaskadShell/quickshell/assets/kaskados-logo.png
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupNotify=true
+X-KaskadOS-Component=file-manager

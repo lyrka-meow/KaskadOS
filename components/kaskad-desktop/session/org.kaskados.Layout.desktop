@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Kaskad DE Layout
+Comment=Preview and apply a Kaskad DE layout
+Icon=preferences-desktop-theme
+Exec=kaskad-shell ipc call layout importFile %f
+Terminal=false
+NoDisplay=true
+MimeType=application/x-kaskados-layout;
+Categories=Settings;DesktopSettings;

@@ -1,0 +1,159 @@
+pkgname=kaskados-desktop
+pkgver=${KASKADOS_DESKTOP_PKGVER:?Передайте KASKADOS_DESKTOP_PKGVER}
+pkgrel=${KASKADOS_DESKTOP_PKGREL:-1}
+pkgdesc='Рабочая среда и системные компоненты KaskadOS'
+arch=('x86_64')
+url='https://github.com/lyrka-meow/KaskadOS'
+license=('GPL-3.0-or-later')
+provides=('kaskad-desktop')
+install=kaskados-desktop.install
+depends=(
+  '7zip'
+  'alsa-utils'
+  'base-devel'
+  'bash'
+  'bluez'
+  'bluez-utils'
+  'btrfs-progs'
+  'brightnessctl'
+  'bubblewrap'
+  'cava'
+  'curl'
+  'dbus'
+  'ddcutil'
+  'desktop-file-utils'
+  'dgop'
+  'dosfstools'
+  'dnsmasq'
+  'e2fsprogs'
+  'exfatprogs'
+  'fatresize'
+  'ffmpeg'
+  'flatpak'
+  'git'
+  'glib2'
+  'hostapd'
+  'hwdata'
+  'iproute2'
+  'iputils'
+  'iw'
+  'kaskados-globalacceld'
+  'kaskados-keyring'
+  'kbookmarks'
+  'kcolorscheme'
+  'kcompletion'
+  'kconfig'
+  'kcoreaddons'
+  'kcrash'
+  'kdecoration'
+  'kglobalaccel'
+  'ki18n'
+  'kiconthemes'
+  'kidletime'
+  'kitemviews'
+  'kjobwidgets'
+  'knighttime'
+  'knotifications'
+  'kpackage'
+  'kservice'
+  'kstatusnotifieritem'
+  'kwayland'
+  'kwidgetsaddons'
+  'kwindowsystem'
+  'lib32-vulkan-intel'
+  'lib32-vulkan-radeon'
+  'libarchive'
+  'libqaccessibilityclient-qt6'
+  'mesa'
+  'nftables'
+  'ntfs-3g'
+  'ntfsprogs'
+  'pacman-contrib'
+  'pciutils'
+  'pipewire'
+  'pipewire-audio'
+  'pipewire-pulse'
+  'polkit'
+  'qt6-5compat'
+  'qt6-connectivity'
+  'qt6-imageformats'
+  'qt6-multimedia'
+  'qt6-positioning'
+  'qt6-sensors'
+  'qt6-svg'
+  'qt6-wayland'
+  'quickshell'
+  'sddm'
+  'shared-mime-info'
+  'solid'
+  'ttf-dejavu'
+  'udisks2'
+  'udisks2-btrfs'
+  'umu-launcher'
+  'unrar'
+  'vulkan-intel'
+  'vulkan-radeon'
+  'wireplumber'
+  'xkeyboard-config'
+  'xorg-xwayland'
+)
+source=()
+sha256sums=()
+
+package() {
+  local payload=${KASKADOS_DESKTOP_PAYLOAD:?Передайте KASKADOS_DESKTOP_PAYLOAD}
+
+  [[ -d "${payload}/opt/kaskad-desktop" ]] || return 1
+  [[ -x "${payload}/usr/bin/start-kaskad-desktop" ]] || return 1
+  [[ -f "${payload}/usr/share/kaskados/release.json" ]] || return 1
+
+  install -d "${pkgdir}/opt"
+  cp -a "${payload}/opt/kaskad-desktop" "${pkgdir}/opt/"
+
+  for path in \
+    usr/bin/start-kaskad-desktop \
+    usr/bin/regalia \
+    usr/bin/regaliad \
+    usr/lib/kaskados/kaskados-system-update \
+    usr/lib/kaskados/kaskados-hotspot-control \
+    usr/lib/systemd/system/kaskados-hotspot-routing.service \
+    usr/lib/systemd/system/kaskados-hotspot-routing.timer \
+    usr/lib/NetworkManager/dispatcher.d/90-kaskados-hotspot-routing \
+    usr/lib/NetworkManager/conf.d/90-kaskados-hotspot.conf \
+    etc/NetworkManager/dnsmasq-shared.d/90-kaskados-hotspot-analytics.conf \
+    usr/lib/regalia \
+    usr/lib/systemd/system/regalia-engine@.service \
+    usr/lib/systemd/user/regaliad.service \
+    usr/lib/systemd/user/xdg-desktop-portal-kaskad.service \
+    usr/lib/udev/rules.d/70-kaskados-input.rules \
+    usr/share/applications/io.kaskados.Files.desktop \
+    usr/share/applications/org.kaskados.Layout.desktop \
+    usr/share/applications/org.kaskados.Shell.desktop \
+    usr/share/applications/org.freedesktop.impl.portal.desktop.kaskad.desktop \
+    usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.kaskad.service \
+    usr/share/kaskados \
+    usr/share/icons/KaskadCursorBase \
+    usr/share/licenses/kaskados-desktop \
+    usr/share/mime/packages/org.kaskados.layout.xml \
+    usr/share/polkit-1/actions/org.kaskados.system-update.policy \
+    usr/share/polkit-1/actions/org.kaskados.hotspot-control.policy \
+    usr/share/polkit-1/rules.d/50-regalia-engine.rules \
+    usr/share/wayland-sessions/kaskad-desktop.desktop \
+    usr/share/xdg-desktop-portal/kaskaddesktop-portals.conf \
+    usr/share/xdg-desktop-portal/portals/kaskad.portal; do
+    [[ -e "${payload}/${path}" ]] || return 1
+    install -d "${pkgdir}/$(dirname -- "${path}")"
+    cp -a "${payload}/${path}" "${pkgdir}/${path}"
+  done
+
+  install -Dm0644 "${payload}/etc/xdg/mimeapps.list" \
+    "${pkgdir}/etc/xdg/mimeapps.list"
+
+  install -d "${pkgdir}/etc/systemd/user/default.target.wants"
+  ln -s /usr/lib/systemd/user/regaliad.service \
+    "${pkgdir}/etc/systemd/user/default.target.wants/regaliad.service"
+
+  install -d "${pkgdir}/usr/bin"
+  ln -s /opt/kaskad-desktop/shell/KaskadShell/core/bin/kaskad-shell \
+    "${pkgdir}/usr/bin/kaskad-shell"
+}

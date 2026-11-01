@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die()
+{
+    echo "start-kaskad-desktop: $*" >&2
+    exit 1
+}
+
+resolve_repo_root()
+{
+    if [[ -n ${KASKAD_DESKTOP_ROOT:-} ]]; then
+        printf '%s\n' "$KASKAD_DESKTOP_ROOT"
+        return
+    fi
+
+    local script_dir
+    script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    if [[ -x "$script_dir/build/compositor/bin/kaskad-compositor" ]]; then
+        printf '%s\n' "$script_dir"
+        return
+    fi
+
+    if [[ -r /etc/kaskad-desktop/dev-root ]]; then
+        IFS= read -r script_dir </etc/kaskad-desktop/dev-root
+        printf '%s\n' "$script_dir"
+        return
+    fi
+
+    die "cannot locate the Kaskad DE checkout; set KASKAD_DESKTOP_ROOT"
+}
+
+if [[ ${1:-} != "--inside-dbus" && -z ${DBUS_SESSION_BUS_ADDRESS:-} ]]; then
+    command -v dbus-run-session >/dev/null ||
+        die "dbus-run-session is required"
+    exec dbus-run-session -- "$0" --inside-dbus
+fi
+
+repo_root=$(resolve_repo_root)
+compositor="$repo_root/build/compositor/bin/kaskad-compositor"
+shell_session="$repo_root/session/run-kaskad"
+qml_module="$repo_root/build/quickshell-kaskad"
+qt_plugins="$repo_root/build/compositor/bin:$repo_root/build/compositor/lib"
+user_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
+prepare_user_config="$repo_root/session/prepare-user-config"
+cursor_exporter="$repo_root/build/compositor/bin/kaskad-cursor-exporter"
+cursor_base=/usr/share/icons/KaskadCursorBase
+cursor_output="${XDG_DATA_HOME:-$HOME/.local/share}/icons/KaskadDynamic"
+
+[[ -x "$compositor" ]] ||
+    die "missing $compositor; build the compositor first"
+[[ -x "$shell_session" ]] ||
+    die "missing $shell_session"
+[[ -f "$qml_module/Kaskad/Ipc/qmldir" ]] ||
+    die "missing the Quickshell Kaskad module; build it first"
+[[ -x "$prepare_user_config" ]] ||
+    die "missing $prepare_user_config"
+[[ -x "$cursor_exporter" ]] ||
+    die "missing $cursor_exporter"
+[[ -d "$cursor_base/cursors" ]] ||
+    die "missing $cursor_base"
+[[ -n ${XDG_RUNTIME_DIR:-} && -d ${XDG_RUNTIME_DIR:-} ]] ||
+    die "XDG_RUNTIME_DIR is unavailable; start this from a real login TTY or SDDM"
+
+"$prepare_user_config" "$repo_root" "$user_config_dir"
+
+# Generate the client-visible cursor before the compositor starts. If a future
+# palette/export regression occurs, use the complete validated Bibata base
+# rather than allowing clients to resolve an empty theme.
+cursor_theme=KaskadDynamic
+if ! "$cursor_exporter" \
+    --base "$cursor_base" \
+    --output "$cursor_output" \
+    --accent '#9fe0b4'; then
+    echo "start-kaskad-desktop: dynamic cursor export failed; using KaskadCursorBase" >&2
+    cursor_theme=KaskadCursorBase
+fi
+
+export KASKAD_DESKTOP_ROOT="$repo_root"
+export QT_PLUGIN_PATH="$qt_plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="$qml_module${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+export LD_LIBRARY_PATH="$repo_root/build/compositor/bin:$repo_root/build/quickshell-kaskad${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XDG_CURRENT_DESKTOP=KaskadDesktop
+export XDG_SESSION_DESKTOP=KaskadDesktop
+export XDG_SESSION_TYPE=wayland
+export QT_QPA_PLATFORM=wayland
+export XCURSOR_THEME="$cursor_theme"
+export XCURSOR_SIZE="${KASKAD_CURSOR_SIZE:-24}"
+export XCURSOR_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/icons:$HOME/.icons:/usr/local/share/icons:/usr/share/icons:/run/host/user-share/icons:/run/host/share/icons"
+export KASKAD_COMPOSITOR_CURSOR_THEME=KaskadCursorBase
+export KASKAD_CURSOR_ACCENT='#9fe0b4'
+unset KDE_FULL_SESSION
+
+if command -v dbus-update-activation-environment >/dev/null; then
+    dbus-update-activation-environment --systemd \
+        WAYLAND_DISPLAY \
+        XDG_CURRENT_DESKTOP \
+        XDG_SESSION_DESKTOP \
+        XDG_SESSION_TYPE \
+        QT_QPA_PLATFORM \
+        XCURSOR_THEME \
+        XCURSOR_SIZE \
+        XCURSOR_PATH \
+        2>/dev/null || true
+fi
+
+exec "$compositor" \
+    --drm \
+    --xwayland \
+    --exit-with-session "$shell_session"

@@ -1,0 +1,4 @@
+# Grant the active local session access to keyboard events used for Caps Lock
+# state. uaccess is scoped by logind to the foreground seat user; unlike adding
+# a user to the input group, it does not permanently expose all input devices.
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"

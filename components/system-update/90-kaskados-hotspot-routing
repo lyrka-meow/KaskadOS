@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+
+# NetworkManager calls dispatchers as root. Maintain only Kaskad-owned
+# forwarding state; this never restarts a radio or an unrelated connection.
+case "${2:-}" in
+    pre-up|up)
+        if [[ "${CONNECTION_ID:-}" == "Kaskad Ethernet Sharing (VPN)" ]]; then
+            /usr/lib/kaskados/kaskados-hotspot-control start-ethernet-vpn "${DEVICE_IFACE:-$1}"
+            exit $?
+        fi
+        if [[ "${CONNECTION_ID:-}" == "Kaskad Ethernet Sharing" ]]; then
+            /usr/lib/kaskados/kaskados-hotspot-control stop-ethernet-vpn "${DEVICE_IFACE:-$1}"
+            exit $?
+        fi
+        [[ -f /run/kaskados-hotspot/active || -f /run/kaskados-ethernet-vpn/active ]] || exit 0
+        /usr/bin/systemctl --no-block start kaskados-hotspot-routing.service
+        ;;
+    down)
+        if [[ "${CONNECTION_ID:-}" == "Kaskad Ethernet Sharing" ||
+              "${CONNECTION_ID:-}" == "Kaskad Ethernet Sharing (VPN)" ]]; then
+            /usr/lib/kaskados/kaskados-hotspot-control stop-ethernet-vpn "${DEVICE_IFACE:-$1}"
+            exit $?
+        fi
+        [[ -f /run/kaskados-hotspot/active || -f /run/kaskados-ethernet-vpn/active ]] || exit 0
+        /usr/bin/systemctl --no-block start kaskados-hotspot-routing.service
+        ;;
+    dhcp4-change|connectivity-change|vpn-up|vpn-down)
+        [[ -f /run/kaskados-hotspot/active || -f /run/kaskados-ethernet-vpn/active ]] || exit 0
+        /usr/bin/systemctl --no-block start kaskados-hotspot-routing.service
+        ;;
+esac

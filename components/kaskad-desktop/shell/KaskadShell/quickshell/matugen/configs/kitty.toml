@@ -1,0 +1,7 @@
+[templates.kaskadShellkitty]
+input_path = 'SHELL_DIR/matugen/templates/kitty.conf'
+output_path = 'CONFIG_DIR/kitty/kaskad-theme.conf'
+
+[templates.kaskadShellkittytabs]
+input_path = 'SHELL_DIR/matugen/templates/kitty-tabs.conf'
+output_path = 'CONFIG_DIR/kitty/kaskad-tabs.conf'

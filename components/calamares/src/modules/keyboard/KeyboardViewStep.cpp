@@ -1,0 +1,123 @@
+/* === This file is part of Calamares - <https://calamares.io> ===
+ *
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ *   Calamares is Free Software: see the License-Identifier above.
+ *
+ */
+
+#include "KeyboardViewStep.h"
+
+#include "Config.h"
+#include "KeyboardPage.h"
+
+#include "GlobalStorage.h"
+#include "JobQueue.h"
+#include "ViewManager.h"
+
+#include <QTimer>
+
+CALAMARES_PLUGIN_FACTORY_DEFINITION( KeyboardViewStepFactory, registerPlugin< KeyboardViewStep >(); )
+
+KeyboardViewStep::KeyboardViewStep( QObject* parent )
+    : Calamares::ViewStep( parent )
+    , m_config( new Config( this ) )
+    , m_widget( new KeyboardPage( m_config ) )
+{
+    emit nextStatusChanged( true );
+}
+
+
+KeyboardViewStep::~KeyboardViewStep()
+{
+    if ( m_widget && m_widget->parent() == nullptr )
+    {
+        m_widget->deleteLater();
+    }
+}
+
+
+QString
+KeyboardViewStep::prettyName() const
+{
+    return tr( "Клавиатура", "@label" );
+}
+
+
+QString
+KeyboardViewStep::prettyStatus() const
+{
+    return m_config->prettyStatus();
+}
+
+
+QWidget*
+KeyboardViewStep::widget()
+{
+    return m_widget;
+}
+
+
+bool
+KeyboardViewStep::isNextEnabled() const
+{
+    return true;
+}
+
+
+bool
+KeyboardViewStep::isBackEnabled() const
+{
+    return true;
+}
+
+
+bool
+KeyboardViewStep::isAtBeginning() const
+{
+    return true;
+}
+
+
+bool
+KeyboardViewStep::isAtEnd() const
+{
+    return true;
+}
+
+
+QList< Calamares::job_ptr >
+KeyboardViewStep::jobs() const
+{
+    return m_config->createJobs();
+}
+
+
+void
+KeyboardViewStep::onActivate()
+{
+    QTimer::singleShot( 0, this, [] { Calamares::ViewManager::instance()->setNavigationVisible( false ); } );
+    m_config->guessLocaleKeyboardLayout();
+}
+
+
+void
+KeyboardViewStep::onLeave()
+{
+    Calamares::ViewManager::instance()->setNavigationVisible( true );
+    m_config->finalize();
+}
+
+void
+KeyboardViewStep::onCancel()
+{
+    m_config->cancel();
+}
+
+void
+KeyboardViewStep::setConfigurationMap( const QVariantMap& configurationMap )
+{
+    m_config->setConfigurationMap( configurationMap );
+    m_config->detectCurrentKeyboardLayout();
+}

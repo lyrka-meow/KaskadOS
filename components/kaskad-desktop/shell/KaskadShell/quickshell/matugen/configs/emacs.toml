@@ -1,0 +1,3 @@
+[templates.kaskadShellemacs]
+input_path = 'SHELL_DIR/matugen/templates/kaskad-emacs.el'
+output_path = 'EMACS_DIR/themes/kaskad-emacs-theme.el'

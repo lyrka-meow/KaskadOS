@@ -1,0 +1,1 @@
+-- Cursor theme overrides. Deploy writes ~/.config/hypr/kaskad-shell/cursor.lua

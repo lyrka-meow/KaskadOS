@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.kaskad
+Exec=@KASKAD_PORTAL_EXECUTABLE@
+SystemdService=xdg-desktop-portal-kaskad.service

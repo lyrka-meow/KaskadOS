@@ -1,0 +1,11 @@
+dir: internal/mocks
+structname: Mock{{.InterfaceName}}
+pkgname: mocks
+filename: 'mock_{{.InterfaceName | snakecase}}.go'
+template: testify
+template-data:
+  unroll-variadic: true
+packages:
+  github.com/lyrka-meow/KaskadOS/components/kaskad-desktop/shell/KaskadShell/core/third_party/kaskadgo/app:
+    interfaces:
+      Runner: {}

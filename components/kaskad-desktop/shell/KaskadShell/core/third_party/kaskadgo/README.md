@@ -1,0 +1,42 @@
+# kaskadgo
+
+Common Go modules used by Kaskad & the Kaskad Linux suite (dcal, dgop, dsearch, and whatever comes next).
+
+Every app in the suite was carrying its own copy of the same logger, unix-socket RPC, chi/huma scaffolding, and XDG path helpers. This is that code, extracted once.
+
+## Packages
+
+| Package | What it is |
+|---|---|
+| `log` | charmbracelet logger singleton. `log.SetEnvPrefix("KASKADCAL")` → reads `KASKAD_CAL_LOG_LEVEL` / `KASKAD_CAL_LOG_FILE`. File sink strips ANSI. |
+| `paths` | XDG dirs + per-process socket paths, keyed by app name. `paths.New("kaskadcal").SocketPath()` |
+| `errdefs` | `CustomError`/`ErrorType` with HTTP status mapping. Apps register their own types from `AppErrorBase` up. stdlib-only. |
+| `errdefs/humaerr` | huma error envelope + `HumaErrorFunc`. Split out so non-HTTP apps never pull huma. |
+| `ipc` | JSON-over-unix-socket RPC: server (ping/subscribe/unsubscribe built in), client, event bus, mux. Stale sockets get reaped by PID. Apps with their own subscribe protocol set `SubscribeHandler`; per-connection handshake capabilities via `CapabilitiesFunc`. |
+| `ipc/params` | Typed extraction from `map[string]any` request params. |
+| `shellapp` | Quickshell app lifecycle: run/restart/kill commands, daemon supervision, PID/session tracking, config-dir resolution (`-c` → `<PREFIX>_SHELL_DIR` → live instance → embedded UI). App-specific behavior hooks in via `PreLaunch`, `ExtraEnv`, `OnUIExit`, and an optional `Done()` channel on the backend. |
+| `shellapp/shellfs` | Materializes an embedded UI tree onto disk — content-hashed, read-only, pruned when stale. |
+| `syncmap` | Generic `sync.Map` (typed keys and values). |
+| `dbusutil` | godbus variant helpers: typed `Get`/`As`, recursive `Normalize`. |
+| `httpapi` | huma/chi scaffold: `NewHumaConfig`, `/docs` page, router with health + recoverer, graceful `Server`. Use à la carte or via `NewRouter`. |
+| `httpapi/middleware` | The chi-ported logger/recoverer/request-id set. |
+| `netutil` | `GetIPAddress` header dance. |
+| `app` | Thin bootstrap: `app.New(info, rootCmd)` wires logging + version, `app.Serve(ctx, runners...)` handles signals and shutdown. Not a framework. |
+
+## Using it
+
+```
+go get github.com/lyrka-meow/KaskadOS/components/kaskad-desktop/shell/KaskadShell/core/third_party/kaskadgo@v0.1.0
+```
+
+## Minimal daemon
+
+```go
+a := app.New(app.Info{Name: "Kaskad Thing", ID: "kaskadthing", Version: version}, rootCmd)
+
+srv := ipc.NewServer(ipc.Config{AppName: "kaskadthing", APIVersion: 1}, route)
+if err := srv.Listen(); err != nil {
+    return err
+}
+return app.Serve(ctx, srv)
+```

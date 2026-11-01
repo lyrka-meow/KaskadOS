@@ -1,0 +1,3 @@
+[templates.kaskadShellzed]
+input_path = 'SHELL_DIR/matugen/templates/kaskad-zed.json'
+output_path = 'CONFIG_DIR/zed/themes/kaskad-zed-theme.json'

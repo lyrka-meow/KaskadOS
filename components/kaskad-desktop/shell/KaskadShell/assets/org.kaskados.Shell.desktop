@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kaskad Shell
+GenericName=Desktop Shell
+Comment=Оболочка Kaskad DE
+Exec=kaskad-shell run
+Icon=kaskadlogo
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+Categories=Utility;
