@@ -192,31 +192,21 @@ function calculateNextSectionIndex(flatModel, selectedFlatIndex) {
 }
 
 function calculatePrevSectionIndex(flatModel, selectedFlatIndex) {
-    var currentSection = null;
-    if (selectedFlatIndex >= 0 && selectedFlatIndex < flatModel.length) {
-        currentSection = flatModel[selectedFlatIndex].sectionId;
+    if (selectedFlatIndex < 0 || selectedFlatIndex >= flatModel.length)
+        return selectedFlatIndex;
+    var currentSection = flatModel[selectedFlatIndex].sectionId;
+    var previousSection = null;
+    var firstItem = -1;
+    for (var i = selectedFlatIndex - 1; i >= 0; i--) {
+        var entry = flatModel[i];
+        if (entry.isHeader || entry.sectionId === currentSection)
+            continue;
+        if (previousSection !== null && entry.sectionId !== previousSection)
+            break;
+        previousSection = entry.sectionId;
+        firstItem = i;
     }
-
-    var lastSectionStart = -1;
-    var prevSectionStart = -1;
-
-    for (var i = 0; i < flatModel.length; i++) {
-        if (flatModel[i].isHeader) {
-            if (flatModel[i].section.id === currentSection) {
-                break;
-            }
-            prevSectionStart = lastSectionStart;
-            lastSectionStart = i;
-        }
-    }
-
-    if (prevSectionStart >= 0) {
-        for (var j = prevSectionStart + 1; j < flatModel.length; j++) {
-            if (!flatModel[j].isHeader)
-                return j;
-        }
-    }
-    return selectedFlatIndex;
+    return firstItem >= 0 ? firstItem : selectedFlatIndex;
 }
 
 function calculatePageDownIndex(flatModel, selectedFlatIndex, visibleItems) {

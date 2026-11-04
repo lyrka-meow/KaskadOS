@@ -1,3 +1,4 @@
+import "ControllerUtils.js" as LauncherUtils
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -143,7 +144,7 @@ Item {
 
         const targetQuery = query || (SettingsData.rememberLastQuery ? (SessionData.launcherLastQuery || "") : "");
         const requestedMode = mode || SessionData.getLauncherRestoreMode();
-        const targetMode = requestedMode === "files" ? "all" : requestedMode;
+        const targetMode = LauncherUtils.normalizeMode(requestedMode);
 
         if (spotlightContent.searchField) {
             spotlightContent.searchField.text = targetQuery;

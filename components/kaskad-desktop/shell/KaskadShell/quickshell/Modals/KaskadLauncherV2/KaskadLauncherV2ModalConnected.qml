@@ -1,3 +1,4 @@
+import "ControllerUtils.js" as LauncherUtils
 pragma ComponentBehavior: Bound
 
 import QtQuick
@@ -369,9 +370,7 @@ Item {
             spotlightContent.searchField.text = targetQuery;
         }
         if (spotlightContent.controller) {
-            var targetMode = mode || SessionData.getLauncherRestoreMode();
-            if (targetMode === "files")
-                targetMode = "all";
+            var targetMode = LauncherUtils.normalizeMode(mode || SessionData.getLauncherRestoreMode());
             spotlightContent.controller.explicitQuerySession = !!query;
             spotlightContent.controller.searchMode = targetMode;
             spotlightContent.controller.activePluginId = "";

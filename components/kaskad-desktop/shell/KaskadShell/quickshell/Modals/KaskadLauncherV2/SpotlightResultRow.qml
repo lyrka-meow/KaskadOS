@@ -15,7 +15,7 @@ Rectangle {
     property bool isSelected: false
     property var controller: null
     property int flatIndex: -1
-    property bool isHovered: itemArea.containsMouse || quickToggleArea.containsMouse
+    property bool isHovered: itemArea.containsMouse
 
     signal clicked
     signal rightClicked(real mouseX, real mouseY)

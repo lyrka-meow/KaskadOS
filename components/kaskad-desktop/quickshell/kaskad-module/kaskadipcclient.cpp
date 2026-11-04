@@ -148,6 +148,10 @@ KaskadIpcClient::KaskadIpcClient(QObject *parent)
     bus.connect(QString::fromLatin1(Service), QString::fromLatin1(Path), QString::fromLatin1(Interface),
                 QStringLiteral("screenshotShortcutChanged"), this, SLOT(handleScreenshotShortcutChanged(QString)));
     bus.connect(QString::fromLatin1(Service), QString::fromLatin1(Path), QString::fromLatin1(Interface),
+                QStringLiteral("launcherRequested"), this, SIGNAL(launcherRequested(QString)));
+    bus.connect(QString::fromLatin1(Service), QString::fromLatin1(Path), QString::fromLatin1(Interface),
+                QStringLiteral("launcherShortcutsChanged"), this, SIGNAL(launcherShortcutsChanged()));
+    bus.connect(QString::fromLatin1(Service), QString::fromLatin1(Path), QString::fromLatin1(Interface),
                 QStringLiteral("microphoneShortcutChanged"), this, SLOT(handleMicrophoneShortcutChanged(QString)));
     bus.connect(QString::fromLatin1(Service), QString::fromLatin1(Path), QString::fromLatin1(Interface),
                 QStringLiteral("microphoneShortcutKeyChanged"), this, SIGNAL(microphoneShortcutKeyChanged(bool)));
@@ -429,6 +433,16 @@ bool KaskadIpcClient::cancelScreenCastSelection(const QString &requestId)
                            QDBusConnection::sessionBus());
     const QDBusReply<bool> reply = chooser.call(QStringLiteral("cancel"), requestId);
     return reply.isValid() && reply.value();
+}
+
+QString KaskadIpcClient::launcherShortcut(const QString &kind) const
+{
+    return m_available && m_protocolVersion >= 27 ? call(QStringLiteral("launcherShortcut"), {kind}).toString() : QString();
+}
+
+bool KaskadIpcClient::setLauncherShortcut(const QString &kind, const QString &shortcut)
+{
+    return m_available && m_protocolVersion >= 27 && call(QStringLiteral("setLauncherShortcut"), {kind, shortcut}).toBool();
 }
 
 bool KaskadIpcClient::setScreenshotShortcut(const QString &shortcut)

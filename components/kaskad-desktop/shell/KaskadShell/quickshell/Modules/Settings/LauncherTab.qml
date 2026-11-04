@@ -169,6 +169,11 @@ Item {
                     }
                 }
 
+                LauncherShortcutEditor {
+                    width: parent.width
+                    actionId: root.defaultLauncherAction
+                }
+
                 SettingsToggleRow {
                     settingKey: "launcherUseOverlayLayer"
                     tags: ["launcher", "fullscreen", "overlay", "layer"]
@@ -260,6 +265,11 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.openKeybindsSearch(root.spotlightBarKeybindSearch)
                     }
+                }
+
+                LauncherShortcutEditor {
+                    width: parent.width
+                    actionId: root.spotlightBarAction
                 }
 
                 SettingsToggleRow {

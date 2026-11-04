@@ -22,7 +22,6 @@ Singleton {
     property bool _defaultCacheValid: false
     property int cacheVersion: 0
 
-    readonly property int maxResults: 10
     readonly property int frecencySampleSize: 10
 
     readonly property var timeBuckets: [
@@ -534,9 +533,11 @@ Singleton {
         };
     }
 
-    function searchApplications(query) {
-        if (!query || query.length === 0)
-            return getVisibleApplications();
+    // Return every candidate with its authoritative score. Folder filtering
+    // and visible-result limits belong to the controller, after matching.
+    function searchRankedApplications(query) {
+        if (!query || query.trim().length === 0)
+            return getVisibleApplications().map(app => ({app: app, score: undefined}));
         if (applications.length === 0)
             return [];
 
@@ -641,7 +642,7 @@ Singleton {
         }
 
         scoredApps.sort((a, b) => b.score - a.score);
-        return scoredApps.slice(0, maxResults).map(item => item.app);
+        return scoredApps;
     }
 
     function searchAppActions(query, apps) {

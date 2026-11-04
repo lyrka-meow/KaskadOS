@@ -1,3 +1,4 @@
+import "ControllerUtils.js" as LauncherUtils
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -160,9 +161,7 @@ Item {
                 spotlightContent.searchField.selectAll();
         }
         if (spotlightContent.controller) {
-            var targetMode = mode || SessionData.getLauncherRestoreMode();
-            if (targetMode === "files")
-                targetMode = "all";
+            var targetMode = LauncherUtils.normalizeMode(mode || SessionData.getLauncherRestoreMode());
             spotlightContent.controller.explicitQuerySession = !!query;
             spotlightContent.controller.searchMode = targetMode;
             spotlightContent.controller.activePluginId = "";

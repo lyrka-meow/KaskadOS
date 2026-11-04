@@ -16,7 +16,6 @@ Item {
     property string searchQuery: ""
     property string searchMode: "apps"
     property string previousSearchMode: "apps"
-    property string appSourceFilter: "all"
     property bool autoSwitchedToFiles: false
     property bool isFileSearching: false
     property var sections: []
@@ -70,11 +69,6 @@ Item {
             appFolderId = allAppsFolderId;
             appFolders = [];
         }
-    }
-
-    onAppSourceFilterChanged: {
-        if (active && searchMode === "apps")
-            performSearch();
     }
 
     Connections {
@@ -384,13 +378,21 @@ Item {
     function setSearchQuery(query) {
         _searchVersion++;
         _queryDrivenSearch = true;
-        searchQuery = query;
+        searchQuery = (query || "").trim();
         requestSearch();
     }
 
+    function updateQueryFromInput(query) {
+        const hasQuery = (query || "").trim().length > 0;
+        if (hasQuery && searchMode === "apps" && appFolderId === allAppsFolderId)
+            setMode("all", true);
+        else if (!hasQuery && searchMode === "all")
+            setMode("apps", true);
+        setSearchQuery(query);
+    }
+
     function setMode(mode, isAutoSwitch, fileTypeOverride, notPersist) {
-        if (mode === "files")
-            mode = "all";
+        mode = Utils.normalizeMode(mode);
         if (mode === "installed") {
             SoftwareService.section = "installed";
             mode = "store";
@@ -426,7 +428,6 @@ Item {
         searchQuery = "";
         searchMode = "apps";
         previousSearchMode = "apps";
-        appSourceFilter = "all";
         autoSwitchedToFiles = false;
         isFileSearching = false;
         fileSearchType = "all";
@@ -746,7 +747,7 @@ Item {
         if (searchMode === "apps") {
             var isFolderFiltered = appFolderId !== allAppsFolderId;
             var cachedSections = AppSearchService.getCachedDefaultSections();
-            if (cachedSections && !searchQuery && !isFolderFiltered && appSourceFilter === "all") {
+            if (cachedSections && !searchQuery && !isFolderFiltered) {
                 var modeCache = _getCachedModeData("apps");
                 if (modeCache) {
                     _applyHighlights(modeCache.sections, "");
@@ -814,7 +815,6 @@ Item {
             return;
         }
 
-
         var apps = searchApps(searchQuery);
         for (var i = 0; i < apps.length; i++) {
             allItems.push(apps[i]);
@@ -861,7 +861,6 @@ Item {
         isSearching = false;
         searchCompleted();
     }
-
 
     function performFileSearch() {
         if (!DSearchService.dsearchAvailable)
@@ -1017,13 +1016,14 @@ Item {
     }
 
     function searchApps(query) {
-        var apps = AppSearchService.searchApplications(query);
+        var apps = AppSearchService.searchRankedApplications(query);
         var items = [];
 
         for (var i = 0; i < apps.length; i++) {
-            var item = getOrTransformApp(apps[i]);
-            if (appSourceFilter === "linux" && item.source === "windows")
-                continue;
+            // Never attach query-specific scores to the shared transform cache.
+            var item = Object.assign({}, getOrTransformApp(apps[i].app), {
+                _preScored: apps[i].score === undefined ? undefined : apps[i].score + 1000
+            });
             items.push(item);
         }
 
@@ -1572,9 +1572,9 @@ Item {
             if (item.isCore) {
                 AppSearchService.executeCoreApp(item.data);
             } else if (item.data?.isAction) {
-                launchAppAction(item.data);
+                if (!launchAppAction(item.data)) return;
             } else {
-                launchApp(item.data);
+                if (!launchApp(item.data)) return;
             }
             break;
         case "system_action":
@@ -1614,7 +1614,7 @@ Item {
         switch (action.action) {
         case "launch":
             executeItem(item);
-            break;
+            return;
         case "open":
             openFile(item.data.path);
             break;
@@ -1632,7 +1632,7 @@ Item {
             break;
         case "execute":
             executeItem(item);
-            break;
+            return;
         case "clipboard_copy":
             ClipboardService.copyEntry(item.data, function () {
                 root.itemExecuted();
@@ -1643,17 +1643,12 @@ Item {
                 root.itemExecuted();
             });
             return;
-        case "launch_dgpu":
-            if (item.type === "app" && item.data) {
-                launchAppWithNvidia(item.data);
-            }
-            break;
         default:
             if (item.type === "app" && action.actionData) {
-                launchAppAction({
+                if (!launchAppAction({
                     parentApp: item.data,
                     actionData: action.actionData
-                });
+                })) return;
             }
         }
 
@@ -1673,18 +1668,10 @@ Item {
 
     function launchApp(app) {
         var entry = _resolveDesktopEntry(app);
-        if (!entry)
-            return;
-        SessionService.launchDesktopEntry(entry);
+        if (!entry || !SessionService.launchDesktopEntry(entry))
+            return false;
         AppUsageHistoryData.addAppUsage(entry);
-    }
-
-    function launchAppWithNvidia(app) {
-        var entry = _resolveDesktopEntry(app);
-        if (!entry)
-            return;
-        SessionService.launchDesktopEntry(entry, true);
-        AppUsageHistoryData.addAppUsage(entry);
+        return true;
     }
 
     function launchAppAction(actionItem) {
@@ -1693,8 +1680,10 @@ Item {
         var entry = _resolveDesktopEntry(actionItem.parentApp);
         if (!entry)
             return;
-        SessionService.launchDesktopAction(entry, actionItem.actionData);
+        if (!SessionService.launchDesktopAction(entry, actionItem.actionData))
+            return false;
         AppUsageHistoryData.addAppUsage(entry);
+        return true;
     }
 
     function openFile(path) {
@@ -1703,8 +1692,7 @@ Item {
         const lower = path.toLowerCase();
         if (lower.includes(".pkg.tar.")) {
             SoftwareService.installLocal(path);
-        } else if (lower.endsWith(".exe")) {
-            WindowsAppsService.openExecutable(path);
+
         } else if (FileManagerService.isArchive(lower)) {
             FileManagerService.extract({
                 path: path,

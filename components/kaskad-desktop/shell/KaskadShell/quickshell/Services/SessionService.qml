@@ -6,6 +6,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.I3
 import qs.Common
+import "../Common/ApplicationCommand.js" as ApplicationCommand
 import qs.Services
 
 Singleton {
@@ -221,20 +222,8 @@ Singleton {
         return /[;&|<>()$`\\"']/.test(prefix);
     }
 
-    function parseEnvVars(envVarsStr) {
-        if (!envVarsStr || envVarsStr.trim().length === 0)
-            return {};
-        const envObj = {};
-        const pairs = envVarsStr.trim().split(/\s+/);
-        for (const pair of pairs) {
-            const eqIndex = pair.indexOf("=");
-            if (eqIndex > 0) {
-                const key = pair.substring(0, eqIndex);
-                const value = pair.substring(eqIndex + 1);
-                envObj[key] = value;
-            }
-        }
-        return envObj;
+    function parseEnvVars(text) {
+        return ApplicationCommand.environment(text);
     }
 
     function isolatedApplicationCommand(appId, command, workDir, environment) {
@@ -256,6 +245,7 @@ Singleton {
             "--collect",
             "--quiet",
             "--service-type=exec",
+            "--expand-environment=no",
             `--unit=${unit}`,
             `--working-directory=${workDir || Quickshell.env("HOME")}`
         ];
@@ -284,90 +274,80 @@ Singleton {
         return wrapped.concat(command);
     }
 
-    function launchIsolatedApplication(appId, command, workDir, environment) {
-        Quickshell.execDetached({
-            command: isolatedApplicationCommand(appId, command, workDir, environment),
-            workingDirectory: workDir,
-            environment: environment
-        });
+    Component {
+        id: applicationLauncherComponent
+        Process {
+            id: applicationLauncher
+            property string applicationName: ""
+            onExited: (exitCode, exitStatus) => {
+                if (exitCode !== 0 || exitStatus !== 0)
+                    ToastService.showError("Не удалось запустить приложение", applicationName + ": проверьте команду, рабочую папку и наличие программы. Код ошибки: " + exitCode);
+                destroy();
+            }
+        }
     }
 
-    function launchDesktopEntry(desktopEntry, useNvidia) {
-        if (!desktopEntry || !desktopEntry.command)
-            return;
-
-        const appId = desktopEntry.id || desktopEntry.execString || desktopEntry.exec || "";
-        if (CompositorService.activateExistingApp(appId))
-            return;
-
-        let cmd = desktopEntry.command;
-        const override = SessionData.getAppOverride(appId);
-
-        const dgpu = useNvidia || (override?.launchOnDgpu && nvidiaCommand);
-        if (dgpu && nvidiaCommand)
-            cmd = [nvidiaCommand].concat(cmd);
-
-        if (override?.extraFlags) {
-            const extraArgs = override.extraFlags.trim().split(/\s+/).filter(arg => arg.length > 0);
-            cmd = cmd.concat(extraArgs);
+    function launchIsolatedApplication(appId, command, workDir, environment) {
+        const process = applicationLauncherComponent.createObject(root, {
+            applicationName: appId || "Приложение",
+            command: isolatedApplicationCommand(appId, command, workDir, environment)
+        });
+        if (!process) {
+            ToastService.showError("Не удалось запустить приложение", appId);
+            return false;
         }
+        process.running = true;
+        return true;
+    }
 
-        const userPrefix = SettingsData.launchPrefix?.trim() || "";
-        const defaultPrefix = Quickshell.env("KASKAD_DEFAULT_LAUNCH_PREFIX") || "";
-        const prefix = userPrefix.length > 0 ? userPrefix : defaultPrefix;
-        const workDir = desktopEntry.workingDirectory || Quickshell.env("HOME");
-        const cursorEnv = typeof SettingsData.getCursorEnvironment === "function" ? SettingsData.getCursorEnvironment() : {};
-
-        const overrideEnv = override?.envVars ? parseEnvVars(override.envVars) : {};
-        const finalEnv = Object.assign({}, cursorEnv, overrideEnv);
-
-        if (desktopEntry.runInTerminal) {
-            const terminal = SessionData.resolveTerminal() || "xterm";
-            const escapedCmd = cmd.map(arg => escapeShellArg(arg)).join(" ");
-            const shellCmd = prefix.length > 0 ? `${prefix} ${escapedCmd}` : escapedCmd;
-            launchIsolatedApplication(appId, [terminal, "-e", "sh", "-c", shellCmd], workDir, finalEnv);
-            return;
-        }
-
-        if (prefix.length > 0 && needsShellExecution(prefix)) {
-            const escapedCmd = cmd.map(arg => escapeShellArg(arg)).join(" ");
-            launchIsolatedApplication(appId, ["sh", "-c", `${prefix} ${escapedCmd}`], workDir, finalEnv);
-            return;
-        }
-
-        if (prefix.length > 0)
-            cmd = prefix.split(" ").concat(cmd);
-
-        launchIsolatedApplication(appId, cmd, workDir, finalEnv);
+    function launchDesktopEntry(desktopEntry, useNvidia, forceNew) {
+        return launchConfiguredApplication(desktopEntry, null, useNvidia, forceNew);
     }
 
     function launchDesktopAction(desktopEntry, action, useNvidia) {
-        if (!desktopEntry || !action || !action.command)
-            return;
-        let cmd = action.command;
+        if (!action)
+            return false;
+        return launchConfiguredApplication(desktopEntry, action, useNvidia, true);
+    }
 
-        const appId = desktopEntry.id || desktopEntry.execString || desktopEntry.exec || "";
+    function launchConfiguredApplication(entry, action, useNvidia, forceNew) {
+        if (!entry)
+            return false;
+        const appId = entry.id || entry.execString || entry.exec || "";
         const override = SessionData.getAppOverride(appId);
-        const dgpu = useNvidia || (override?.launchOnDgpu && nvidiaCommand);
+        let prepared;
+        try {
+            prepared = ApplicationCommand.prepare(entry, override, action);
+        } catch (error) {
+            ToastService.showError("Не удалось запустить приложение", String(error.message || error));
+            return false;
+        }
+        // A new launch is required to apply explicitly requested GPU or edited
+        // launch parameters; focusing an old process would silently ignore them.
+        const editedLaunch = override && (override.command || override.extraFlags || override.envVars || override.workingDirectory || override.runInTerminal !== undefined || override.launchOnDgpu);
+        if (!action && !forceNew && !useNvidia && !editedLaunch && CompositorService.activateExistingApp(appId))
+            return true;
+
+        let cmd = prepared.command;
+        const dgpu = useNvidia || override?.launchOnDgpu;
         if (dgpu && nvidiaCommand)
             cmd = [nvidiaCommand].concat(cmd);
-
         const userPrefix = SettingsData.launchPrefix?.trim() || "";
-        const defaultPrefix = Quickshell.env("KASKAD_DEFAULT_LAUNCH_PREFIX") || "";
-        const prefix = userPrefix.length > 0 ? userPrefix : defaultPrefix;
-        const workDir = desktopEntry.workingDirectory || Quickshell.env("HOME");
+        const prefix = userPrefix || Quickshell.env("KASKAD_DEFAULT_LAUNCH_PREFIX") || "";
+        const workDir = prepared.workingDirectory || Quickshell.env("HOME");
         const cursorEnv = typeof SettingsData.getCursorEnvironment === "function" ? SettingsData.getCursorEnvironment() : {};
+        const environment = Object.assign({}, cursorEnv, prepared.environment);
 
+        // Preserve the existing explicit global shell-prefix contract. The
+        // per-application command editor never introduces shell evaluation.
         if (prefix.length > 0 && needsShellExecution(prefix)) {
-            const escapedCmd = cmd.map(arg => escapeShellArg(arg)).join(" ");
-            launchIsolatedApplication(appId, ["sh", "-c", `${prefix} ${escapedCmd}`], workDir, cursorEnv);
-            return;
+            cmd = ["sh", "-c", prefix + " " + cmd.map(arg => escapeShellArg(arg)).join(" ")];
+        } else if (prefix.length > 0) {
+            cmd = ApplicationCommand.parse(prefix).concat(cmd);
         }
-
-        if (prefix.length > 0)
-            cmd = prefix.split(" ").concat(cmd);
-
-        launchIsolatedApplication(appId, cmd, workDir, cursorEnv);
+        if (prepared.runInTerminal)
+            cmd = [SessionData.resolveTerminal() || "xterm", "-e"].concat(cmd);
+        return launchIsolatedApplication(appId, cmd, workDir, environment);
     }
 
     // * Session management

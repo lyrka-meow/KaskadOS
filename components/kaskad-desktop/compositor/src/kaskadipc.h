@@ -68,6 +68,8 @@ public Q_SLOTS:
     bool setWindowFullscreen(const QString &id, bool fullscreen);
     bool moveWindowToWorkspace(const QString &windowId, const QString &workspaceId);
     void requestOverview(const QString &reason = QStringLiteral("ipc"));
+    QString launcherShortcut(const QString &kind) const;
+    bool setLauncherShortcut(const QString &kind, const QString &shortcut);
     QString screenshotShortcut() const;
     bool setScreenshotShortcut(const QString &shortcut);
     bool setScreenshotProfilesJson(const QString &profilesJson);
@@ -118,6 +120,8 @@ Q_SIGNALS:
     void windowActionPromptDismissed(const QString &windowId, const QString &action);
     void screenshotRequested();
     void screenshotProfileRequested(const QString &profileId);
+    void launcherRequested(const QString &kind);
+    void launcherShortcutsChanged();
     void screenshotShortcutChanged(const QString &shortcut);
     void microphoneShortcutChanged(const QString &shortcut);
     void microphoneShortcutKeyChanged(bool pressed);
@@ -130,6 +134,7 @@ private:
 
     Workspace *m_workspace;
     bool m_topologyChangePending = false;
+    QHash<QString, QAction *> m_launcherActions;
     QAction *m_screenshotAction = nullptr;
     QHash<QString, QAction *> m_screenshotProfileActions;
     QAction *m_toggleHoveredBorderAction = nullptr;

@@ -1,4 +1,6 @@
 import QtQuick
+import "../../Common/ApplicationCommand.js" as ApplicationCommand
+import qs.Modals.FileBrowser
 import qs.Common
 import qs.Services
 import qs.Widgets
@@ -9,10 +11,18 @@ FocusScope {
     property var editingApp: null
     property string editAppId: ""
 
+    property string validationError: ""
+    property var originalOverride: ({})
+
     signal closeRequested
 
     function loadOverride() {
         var existing = SessionData.getAppOverride(editAppId);
+        originalOverride = Object.assign({}, existing || {});
+        validationError = "";
+        editCommandField.text = ApplicationCommand.format(existing?.command || editingApp?.command || []);
+        editDirectoryField.text = existing?.workingDirectory || editingApp?.workingDirectory || "";
+        terminalToggle.checked = existing?.runInTerminal !== undefined ? existing.runInTerminal : !!editingApp?.runInTerminal;
         editNameField.text = existing?.name || "";
         editIconField.text = existing?.icon || "";
         editCommentField.text = existing?.comment || "";
@@ -22,7 +32,27 @@ FocusScope {
     }
 
     function saveAppOverride() {
-        var override = {};
+        var override = Object.assign({}, originalOverride);
+        for (const key of ["name", "icon", "comment", "envVars", "extraFlags", "command", "workingDirectory", "runInTerminal"])
+            delete override[key];
+        try {
+            const command = ApplicationCommand.parse(editCommandField.text);
+            if (JSON.stringify(command) !== JSON.stringify(editingApp?.command || []))
+                override.command = command;
+            if (editDirectoryField.text.trim() !== (editingApp?.workingDirectory || ""))
+                override.workingDirectory = editDirectoryField.text.trim();
+            if (terminalToggle.checked !== !!editingApp?.runInTerminal)
+                override.runInTerminal = terminalToggle.checked;
+            ApplicationCommand.prepare(editingApp, Object.assign({}, override, {
+                envVars: editEnvVarsField.text,
+                extraFlags: editExtraFlagsField.text
+            }), null);
+        } catch (error) {
+            validationError = String(error.message || error);
+            Qt.callLater(() => editFlickable.contentY = Math.max(0, validationMessage.y - Theme.spacingM));
+            return;
+        }
+        validationError = "";
         if (editNameField.text.trim())
             override.name = editNameField.text.trim();
         if (editIconField.text.trim())
@@ -33,13 +63,29 @@ FocusScope {
             override.envVars = editEnvVarsField.text.trim();
         if (editExtraFlagsField.text.trim())
             override.extraFlags = editExtraFlagsField.text.trim();
-        SessionData.setAppOverride(editAppId, override);
+        if (!SessionData.setAppOverride(editAppId, override)) {
+            validationError = "Не удалось сохранить настройки ярлыка. Проверьте доступ к файлу настроек. Изменения остались в форме.";
+            Qt.callLater(() => editFlickable.contentY = Math.max(0, validationMessage.y - Theme.spacingM));
+            return;
+        }
         closeRequested();
     }
 
     function resetAppOverride() {
-        SessionData.clearAppOverride(editAppId);
+        if (!SessionData.clearAppOverride(editAppId)) {
+            validationError = "Не удалось сбросить настройки ярлыка. Проверьте доступ к файлу настроек.";
+            Qt.callLater(() => editFlickable.contentY = Math.max(0, validationMessage.y - Theme.spacingM));
+            return;
+        }
         closeRequested();
+    }
+
+    FileBrowserModal {
+        id: iconBrowser
+        browserTitle: "Выбрать значок"
+        browserType: "generic"
+        filterExtensions: ["*.svg", "*.png", "*.jpg", "*.webp"]
+        onFileSelected: path => { editIconField.text = path; close(); }
     }
 
     Keys.onPressed: event => {
@@ -102,7 +148,7 @@ FocusScope {
                 spacing: Theme.spacingXXS
 
                 StyledText {
-                    text: I18n.tr("Edit App")
+                    text: "Настроить ярлык"
                     font.pixelSize: Theme.fontSizeLarge
                     color: Theme.surfaceText
                     font.weight: Font.Medium
@@ -123,6 +169,7 @@ FocusScope {
         }
 
         Flickable {
+            id: editFlickable
             width: parent.width
             height: parent.height - y - buttonsRow.height - Theme.spacingM
             contentHeight: editFieldsColumn.height
@@ -172,6 +219,10 @@ FocusScope {
                         keyNavigationTab: editCommentField
                         keyNavigationBacktab: editNameField
                     }
+                    KaskadButton {
+                        text: "Выбрать изображение…"
+                        onClicked: iconBrowser.open()
+                    }
                 }
 
                 Column {
@@ -189,9 +240,61 @@ FocusScope {
                         id: editCommentField
                         width: parent.width
                         placeholderText: root.editingApp?.comment || ""
-                        keyNavigationTab: editEnvVarsField
+                        keyNavigationTab: editCommandField
                         keyNavigationBacktab: editIconField
                     }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingXS
+                    StyledText { text: "Команда запуска"; color: Theme.surfaceText }
+                    StyledText {
+                        width: parent.width
+                        text: "Программа и аргументы. Например: prime-run \"/путь/к программе\". Это команда запуска в Kaskad DE, не исходная строка Exec: коды %U и %F сюда добавлять не нужно."
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.surfaceVariantText
+                    }
+                    KaskadTextField {
+                        id: editCommandField
+                        width: parent.width
+                        keyNavigationTab: editDirectoryField
+                        keyNavigationBacktab: editCommentField
+                    }
+                    StyledText {
+                        width: parent.width
+                        text: "Изменения применятся при новом запуске. Уже открытое приложение продолжит работать с прежними параметрами."
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.surfaceVariantText
+                    }
+                }
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingXS
+                    StyledText { text: "Рабочая папка"; color: Theme.surfaceText }
+                    KaskadTextField {
+                        id: editDirectoryField
+                        width: parent.width
+                        placeholderText: "Пусто — папка приложения или домашняя папка"
+                        keyNavigationTab: editEnvVarsField
+                        keyNavigationBacktab: editCommandField
+                    }
+                }
+                KaskadToggle {
+                    id: terminalToggle
+                    width: parent.width
+                    text: "Запускать в терминале"
+                    onToggled: checked => terminalToggle.checked = checked
+                }
+                StyledText {
+                    id: validationMessage
+                    width: parent.width
+                    visible: root.validationError.length > 0
+                    text: root.validationError
+                    color: Theme.error
+                    wrapMode: Text.WordWrap
                 }
 
                 Column {
@@ -216,7 +319,7 @@ FocusScope {
                         width: parent.width
                         placeholderText: "VAR=value"
                         keyNavigationTab: editExtraFlagsField
-                        keyNavigationBacktab: editCommentField
+                        keyNavigationBacktab: editDirectoryField
                     }
                 }
 
@@ -245,80 +348,14 @@ FocusScope {
         Row {
             id: buttonsRow
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Theme.spacingM
-
-            Rectangle {
-                id: resetButton
-                width: 90
-                height: 40
-                radius: Theme.cornerRadius
-                color: resetButtonArea.containsMouse ? Theme.surfacePressed : Theme.surfaceVariantAlpha
+            spacing: Theme.spacingS
+            KaskadButton {
+                text: "Сбросить"
                 visible: SessionData.getAppOverride(root.editAppId) !== null
-
-                StyledText {
-                    text: I18n.tr("Reset")
-                    font.pixelSize: Theme.fontSizeMedium
-                    color: Theme.error
-                    font.weight: Font.Medium
-                    anchors.centerIn: parent
-                }
-
-                MouseArea {
-                    id: resetButtonArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.resetAppOverride()
-                }
+                onClicked: root.resetAppOverride()
             }
-
-            Rectangle {
-                id: cancelButton
-                width: 90
-                height: 40
-                radius: Theme.cornerRadius
-                color: cancelButtonArea.containsMouse ? Theme.surfacePressed : Theme.surfaceVariantAlpha
-
-                StyledText {
-                    text: I18n.tr("Cancel")
-                    font.pixelSize: Theme.fontSizeMedium
-                    color: Theme.surfaceText
-                    font.weight: Font.Medium
-                    anchors.centerIn: parent
-                }
-
-                MouseArea {
-                    id: cancelButtonArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.closeRequested()
-                }
-            }
-
-            Rectangle {
-                id: saveButton
-                width: 90
-                height: 40
-                radius: Theme.cornerRadius
-                color: saveButtonArea.containsMouse ? Theme.withAlpha(Theme.primary, 0.9) : Theme.primary
-
-                StyledText {
-                    text: I18n.tr("Save")
-                    font.pixelSize: Theme.fontSizeMedium
-                    color: Theme.primaryText
-                    font.weight: Font.Medium
-                    anchors.centerIn: parent
-                }
-
-                MouseArea {
-                    id: saveButtonArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.saveAppOverride()
-                }
-            }
+            KaskadButton { text: "Отмена"; onClicked: root.closeRequested() }
+            KaskadButton { text: "Сохранить"; onClicked: root.saveAppOverride() }
         }
     }
 }

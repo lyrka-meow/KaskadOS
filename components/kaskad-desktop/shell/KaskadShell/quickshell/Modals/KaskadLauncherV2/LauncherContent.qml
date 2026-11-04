@@ -21,8 +21,7 @@ FocusScope {
     readonly property alias activeContextMenu: contextMenu
     property var transientSurfaceTracker: null
     readonly property bool softwareMode: controller.searchMode === "store" || controller.searchMode === "installed"
-    readonly property bool windowsMode: controller.searchMode === "windows"
-    readonly property bool specialMode: softwareMode || windowsMode
+    readonly property bool specialMode: softwareMode
 
     property bool editMode: false
     property var editingApp: null
@@ -41,17 +40,8 @@ FocusScope {
 
     function footerModeSelected(mode) {
         if (mode === "apps")
-            return controller.searchMode === "apps" || controller.searchMode === "all" || controller.searchMode === "windows";
+            return controller.searchMode === "apps" || controller.searchMode === "all";
         return controller.searchMode === mode;
-    }
-
-    function selectApplicationSection(section) {
-        if (section === "windows") {
-            controller.setMode("windows");
-            return;
-        }
-        controller.appSourceFilter = section;
-        controller.setMode("apps");
     }
 
     function resetScroll() {
@@ -164,29 +154,6 @@ FocusScope {
             case Qt.Key_Return:
             case Qt.Key_Enter:
                 softwareCatalogView.activateSelected();
-                event.accepted = true;
-                return;
-            }
-        }
-
-        if (root.windowsMode) {
-            switch (event.key) {
-            case Qt.Key_Escape:
-                if (root.parentModal)
-                    root.parentModal.hide();
-                event.accepted = true;
-                return;
-            case Qt.Key_Down:
-                windowsAppsView.selectNext();
-                event.accepted = true;
-                return;
-            case Qt.Key_Up:
-                windowsAppsView.selectPrevious();
-                event.accepted = true;
-                return;
-            case Qt.Key_Return:
-            case Qt.Key_Enter:
-                windowsAppsView.activateSelected();
                 event.accepted = true;
                 return;
             }
@@ -333,13 +300,6 @@ FocusScope {
         case Qt.Key_4:
             if (hasCtrl || hasAlt) {
                 controller.setMode("installed");
-                return;
-            }
-            event.accepted = false;
-            return;
-        case Qt.Key_5:
-            if (hasCtrl || hasAlt) {
-                controller.setMode("windows");
                 return;
             }
             event.accepted = false;
@@ -541,21 +501,13 @@ FocusScope {
                 font.pixelSize: Theme.fontSizeLarge
                 enabled: root.parentModal ? (root.parentModal.spotlightOpen || root.parentModal.isClosing) : true
                 placeholderText: root.softwareMode ? "Найти приложение или пакет"
-                    : root.windowsMode ? "Найти Windows-приложение"
-                    : "Найти приложение, файл или настройку"
+                    : "Найти приложение или настройку"
                 ignoreUpDownKeys: true
                 ignoreTabKeys: true
                 keyForwardTargets: [root]
 
                 onTextChanged: {
-                    const trimmed = text.trim();
-                    if (trimmed.length > 0 && controller.searchMode === "apps") {
-                        controller.appSourceFilter = "all";
-                        controller.setMode("all", true);
-                    } else if (trimmed.length === 0 && controller.searchMode === "all") {
-                        controller.setMode("apps", true);
-                    }
-                    controller.setSearchQuery(text);
+                    controller.updateQueryFromInput(text);
                     if (actionPanel.expanded) {
                         actionPanel.hide();
                     }
@@ -606,43 +558,11 @@ FocusScope {
                     return root.parentModal.isClosing ? 0 : 1;
                 }
 
-                Row {
-                    id: applicationFilterBar
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    height: visible ? 48 : 0
-                    visible: controller.searchMode === "apps" || controller.searchMode === "windows"
-                    spacing: Theme.spacingXXS
-
-                    Repeater {
-                        model: [
-                            {"label": "Все", "value": "all"},
-                            {"label": "Linux", "value": "linux"},
-                            {"label": "Windows", "value": "windows"}
-                        ]
-
-                        KaskadButton {
-                            required property var modelData
-                            text: modelData.label
-                            backgroundColor: (modelData.value === "windows"
-                                ? controller.searchMode === "windows"
-                                : controller.searchMode === "apps" && controller.appSourceFilter === modelData.value)
-                                ? Theme.primary : Theme.surfaceContainerHighest
-                            textColor: (modelData.value === "windows"
-                                ? controller.searchMode === "windows"
-                                : controller.searchMode === "apps" && controller.appSourceFilter === modelData.value)
-                                ? Theme.primaryText : Theme.surfaceText
-                            onClicked: root.selectApplicationSection(modelData.value)
-                        }
-                    }
-                }
-
                 ResultsList {
                     id: resultsList
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.top: applicationFilterBar.bottom
+                    anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     visible: !root.specialMode
                     controller: root.controller
@@ -670,17 +590,6 @@ FocusScope {
                     onLocalPackageRequested: localPackageBrowser.open()
                 }
 
-                WindowsAppsView {
-                    id: windowsAppsView
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: applicationFilterBar.bottom
-                    anchors.bottom: parent.bottom
-                    visible: root.windowsMode
-                    focus: visible
-                    query: controller.searchQuery
-                    onExecutableRequested: windowsExecutableBrowser.open()
-                }
             }
 
             ActionPanel {
@@ -707,19 +616,6 @@ FocusScope {
         }
     }
 
-    FileBrowserModal {
-        id: windowsExecutableBrowser
-        browserTitle: "Открыть Windows-приложение"
-        browserIcon: "window"
-        browserType: "generic"
-        showHiddenFiles: true
-        fileExtensions: ["*.exe", "*.EXE"]
-        onFileSelected: path => {
-            WindowsAppsService.openExecutable(path);
-            close();
-        }
-    }
-
     Connections {
         target: controller
         function onSelectedItemChanged() {
@@ -729,9 +625,6 @@ FocusScope {
         }
         function onSearchQueryRequested(query) {
             searchField.text = query;
-        }
-        function onModeChanged() {
-            extFilterField.text = "";
         }
     }
 

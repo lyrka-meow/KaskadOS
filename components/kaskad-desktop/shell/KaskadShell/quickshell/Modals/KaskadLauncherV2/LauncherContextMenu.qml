@@ -133,7 +133,7 @@ Item {
                 items.push({
                     type: "item",
                     icon: "edit",
-                    text: I18n.tr("Edit App"),
+                    text: "Настроить ярлык…",
                     action: editCurrentApp
                 });
             }
@@ -173,15 +173,6 @@ Item {
         items.push({
             type: "separator"
         });
-
-        if (isRegularApp && SessionService.nvidiaCommand) {
-            items.push({
-                type: "item",
-                icon: "memory",
-                text: I18n.tr("Launch on dGPU"),
-                action: launchWithNvidia
-            });
-        }
 
         items.push({
             type: "item",
@@ -283,16 +274,8 @@ Item {
         }
         if (!desktopEntry)
             return;
-        SessionService.launchDesktopEntry(desktopEntry);
-        AppUsageHistoryData.addAppUsage(desktopEntry);
-        controller?.itemExecuted();
-        hide();
-    }
-
-    function launchWithNvidia() {
-        if (!desktopEntry)
+        if (!SessionService.launchDesktopEntry(desktopEntry))
             return;
-        SessionService.launchDesktopEntry(desktopEntry, true);
         AppUsageHistoryData.addAppUsage(desktopEntry);
         controller?.itemExecuted();
         hide();
@@ -301,7 +284,8 @@ Item {
     function executeDesktopAction(actionData) {
         if (!desktopEntry || !actionData)
             return;
-        SessionService.launchDesktopAction(desktopEntry, actionData.actionData || actionData);
+        if (!SessionService.launchDesktopAction(desktopEntry, actionData.actionData || actionData))
+            return;
         AppUsageHistoryData.addAppUsage(desktopEntry);
         controller?.itemExecuted();
         hide();

@@ -1,6 +1,7 @@
 pragma Singleton
 pragma ComponentBehavior: Bound
 import QtQuick
+import Kaskad.Ipc
 import Quickshell
 import Quickshell.Wayland
 import qs.Common
@@ -8,6 +9,17 @@ import qs.Services
 
 Singleton {
     id: root
+
+    Connections {
+        target: Kaskad
+        ignoreUnknownSignals: true
+        function onLauncherRequested(kind) {
+            if (kind === "default")
+                root.toggleKaskadLauncherV2();
+            else if (kind === "spotlight")
+                root.toggleSpotlightBar();
+        }
+    }
 
     property var controlCenterPopout: null
     property var controlCenterLoader: null

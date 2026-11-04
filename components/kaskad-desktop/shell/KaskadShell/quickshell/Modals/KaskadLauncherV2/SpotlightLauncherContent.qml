@@ -9,6 +9,19 @@ import qs.Widgets
 FocusScope {
     id: root
 
+    property bool editMode: false
+    property var editingApp: null
+    function openEditMode(app) {
+        if (!app) return;
+        editingApp = app;
+        editMode = true;
+    }
+    function closeEditMode() {
+        editMode = false;
+        editingApp = null;
+        Qt.callLater(() => searchInput.forceActiveFocus());
+    }
+
     property var parentModal: null
     property alias searchField: searchInput
     property alias controller: searchController
@@ -16,8 +29,7 @@ FocusScope {
     property var transientSurfaceTracker: null
 
     readonly property bool softwareMode: searchController.searchMode === "store" || searchController.searchMode === "installed"
-    readonly property bool windowsMode: searchController.searchMode === "windows"
-    readonly property bool specialMode: softwareMode || windowsMode
+    readonly property bool specialMode: softwareMode
     readonly property bool applicationHome: searchController.searchMode === "apps"
 
     readonly property bool _hasQuery: searchInput.text.length > 0
@@ -50,7 +62,7 @@ FocusScope {
         return Theme.surfaceContainer;
     }
 
-    implicitHeight: _searchAreaH + resultsContainer.height
+    implicitHeight: editMode ? Math.min(640, (parentModal?.screenHeight ?? 900) - 100) : _searchAreaH + resultsContainer.height
 
     property bool _animateResize: false
 
@@ -109,16 +121,6 @@ FocusScope {
         contextMenu.show(localPos.x, localPos.y, item, fromKeyboard);
     }
 
-    function _selectApplicationSection(section) {
-        if (section === "windows") {
-            searchController.setMode("windows");
-            return;
-        }
-        searchController.appSourceFilter = section;
-        searchController.setMode("apps");
-        root._focusSearch();
-    }
-
     function _handleKey(event) {
         const hasCtrl = event.modifiers & Qt.ControlModifier;
         const hasAlt = event.modifiers & Qt.AltModifier;
@@ -134,8 +136,6 @@ FocusScope {
         case Qt.Key_Down:
             if (softwareMode)
                 softwareCatalogView.selectNext();
-            else if (windowsMode)
-                windowsAppsView.selectNext();
             else
                 searchController.selectNext();
             event.accepted = true;
@@ -143,8 +143,6 @@ FocusScope {
         case Qt.Key_Up:
             if (softwareMode)
                 softwareCatalogView.selectPrevious();
-            else if (windowsMode)
-                windowsAppsView.selectPrevious();
             else
                 searchController.selectPrevious();
             event.accepted = true;
@@ -183,8 +181,6 @@ FocusScope {
         case Qt.Key_Enter:
             if (softwareMode) {
                 softwareCatalogView.activateSelected();
-            } else if (windowsMode) {
-                windowsAppsView.activateSelected();
             } else if (event.modifiers & Qt.ShiftModifier) {
                 searchController.pasteSelected();
             } else {
@@ -239,7 +235,7 @@ FocusScope {
         controller: searchController
         searchField: searchInput
         parentHandler: root
-        allowEditActions: false
+        onEditAppRequested: app => root.openEditMode(app)
         transientSurfaceTracker: root.transientSurfaceTracker
     }
 
@@ -277,6 +273,7 @@ FocusScope {
 
     Item {
         id: searchBarItem
+        visible: !root.editMode
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -309,7 +306,6 @@ FocusScope {
                     anchors.centerIn: parent
                     name: searchController.searchMode === "store" ? "storefront"
                         : searchController.searchMode === "installed" ? "inventory_2"
-                        : searchController.searchMode === "windows" ? "window"
                         : searchController.searchMode === "apps" ? "apps"
                         : searchController.activePluginId ? "extension" : "search"
                     size: 20
@@ -399,8 +395,7 @@ FocusScope {
                 anchors.rightMargin: Theme.spacingS
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.softwareMode ? "Найти приложение или пакет"
-                    : root.windowsMode ? "Найти Windows-приложение"
-                    : "Найти приложение, файл или настройку"
+                    : "Найти приложение или настройку"
                 font.pixelSize: 18
                 font.weight: Font.Medium
                 color: Theme.outlineButton
@@ -423,19 +418,7 @@ FocusScope {
                 clip: true
                 focus: true
 
-                onTextChanged: {
-                    if (root.specialMode) {
-                        return;
-                    } else if (text.length > 0) {
-                        if (searchController.searchMode === "apps") {
-                            searchController.appSourceFilter = "all";
-                            searchController.setMode("all", true);
-                        }
-                        searchController.setSearchQuery(text);
-                    } else {
-                        searchController.reset();
-                    }
-                }
+                onTextChanged: searchController.updateQueryFromInput(text)
 
                 Keys.onPressed: event => root._handleKey(event)
             }
@@ -444,6 +427,7 @@ FocusScope {
 
     Item {
         id: resultsContainer
+        visible: !root.editMode
         anchors.top: searchBarItem.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -459,46 +443,11 @@ FocusScope {
             }
         }
 
-        Row {
-            id: applicationFilterBar
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.leftMargin: Theme.spacingS
-            anchors.rightMargin: Theme.spacingS
-            anchors.topMargin: Theme.spacingS
-            height: visible ? 36 : 0
-            visible: searchController.searchMode === "apps" || searchController.searchMode === "windows"
-            spacing: Theme.spacingXXS
-
-            Repeater {
-                model: [
-                    {"label": "Все", "value": "all"},
-                    {"label": "Linux", "value": "linux"},
-                    {"label": "Windows", "value": "windows"}
-                ]
-
-                KaskadButton {
-                    required property var modelData
-                    text: modelData.label
-                    backgroundColor: (modelData.value === "windows"
-                        ? searchController.searchMode === "windows"
-                        : searchController.searchMode === "apps" && searchController.appSourceFilter === modelData.value)
-                        ? Theme.primary : Theme.surfaceContainerHighest
-                    textColor: (modelData.value === "windows"
-                        ? searchController.searchMode === "windows"
-                        : searchController.searchMode === "apps" && searchController.appSourceFilter === modelData.value)
-                        ? Theme.primaryText : Theme.surfaceText
-                    onClicked: root._selectApplicationSection(modelData.value)
-                }
-            }
-        }
-
         SpotlightResultsList {
             id: resultsList
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: applicationFilterBar.bottom
+            anchors.top: parent.top
             anchors.bottom: parent.bottom
             visible: !root.specialMode
             controller: searchController
@@ -521,18 +470,6 @@ FocusScope {
             onLocalPackageRequested: localPackageBrowser.open()
         }
 
-        WindowsAppsView {
-            id: windowsAppsView
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: applicationFilterBar.bottom
-            anchors.bottom: parent.bottom
-            anchors.margins: Theme.spacingS
-            visible: root.windowsMode
-            focus: visible
-            query: searchInput.text
-            onExecutableRequested: windowsExecutableBrowser.open()
-        }
     }
 
     readonly property var _categoryModel: [
@@ -548,7 +485,7 @@ FocusScope {
 
     function _isCategorySelected(cat) {
         if (cat.mode === "apps")
-            return searchController.searchMode === "apps" || searchController.searchMode === "all" || searchController.searchMode === "windows";
+            return searchController.searchMode === "apps" || searchController.searchMode === "all";
         return searchController.searchMode === cat.mode;
     }
 
@@ -587,16 +524,17 @@ FocusScope {
         }
     }
 
-    FileBrowserModal {
-        id: windowsExecutableBrowser
-        browserTitle: "Открыть Windows-приложение"
-        browserIcon: "window"
-        browserType: "generic"
-        showHiddenFiles: true
-        fileExtensions: ["*.exe", "*.EXE"]
-        onFileSelected: path => {
-            WindowsAppsService.openExecutable(path);
-            close();
+    Loader {
+        anchors.fill: parent
+        anchors.margins: Theme.spacingM
+        active: root.editMode
+        visible: active
+        sourceComponent: AppEditView {
+            editingApp: root.editingApp
+            editAppId: root.editingApp?.id || ""
+            onCloseRequested: root.closeEditMode()
         }
+        onLoaded: item.loadOverride()
     }
+
 }

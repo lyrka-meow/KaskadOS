@@ -347,18 +347,11 @@ Singleton {
         const hasData = Object.keys(_allBinds).length > 0;
         loading = showLoading !== false && !hasData;
         if (currentProvider === "kaskad") {
-            _rawData = {
-                "provider": "kaskad",
-                "binds": {
-                    "Screenshot": [{
-                        "key": Kaskad.screenshotShortcut,
-                        "action": "spawn kaskad-shell ipc call screenshot capture quick-region",
-                        "desc": "Kaskad Screenshot: Quick Region",
-                        "source": "kaskad-shell-default",
-                        "hasDefault": true
-                    }]
-                }
-            };
+            const nativeBinds = nativeShortcutDefinitions().map(def => ({
+                key: nativeShortcutValue(def), action: def.action, desc: def.label,
+                source: "kaskad-shell-default", hasDefault: true
+            }));
+            _rawData = {provider: "kaskad", binds: {Kaskad: nativeBinds}};
             _processData();
             loading = false;
             return;
@@ -522,6 +515,40 @@ Singleton {
         return [];
     }
 
+    function nativeShortcutDefinitions() {
+        const defs = [{kind: "screenshot", action: "spawn kaskad-shell ipc call screenshot capture quick-region", label: "Снимок области экрана", defaultKey: "Super+Shift+S"}];
+        if (Kaskad.protocolVersion >= 27 && typeof Kaskad.launcherShortcut === "function") {
+            defs.push({kind: "default", action: "spawn kaskad-shell ipc call spotlight toggle", label: "Лаунчер по умолчанию", defaultKey: ""});
+            defs.push({kind: "spotlight", action: "spawn kaskad-shell ipc call spotlight-bar toggle", label: "Компактный лаунчер по центру", defaultKey: ""});
+        }
+        return defs;
+    }
+
+    function nativeShortcutValue(def) {
+        return def.kind === "screenshot" ? Kaskad.screenshotShortcut : Kaskad.launcherShortcut(def.kind);
+    }
+
+    function nativeShortcutForKey(key) {
+        return nativeShortcutDefinitions().find(def => nativeShortcutValue(def) === key);
+    }
+
+    function writeNativeShortcut(def, key) {
+        return def.kind === "screenshot" ? Kaskad.setScreenshotShortcut(key) : Kaskad.setLauncherShortcut(def.kind, key);
+    }
+
+    function nativeShortcutError() {
+        lastError = "Не удалось назначить сочетание: оно занято, недопустимо или действие не поддерживается. Изменяйте клавишу в строке нужного действия.";
+        ToastService.showError(I18n.tr("Failed to save keybind"), lastError);
+    }
+
+    Connections {
+        target: Kaskad
+        ignoreUnknownSignals: true
+        function onLauncherShortcutsChanged() { if (root.currentProvider === "kaskad") root.loadBinds(false); }
+        function onScreenshotShortcutChanged() { if (root.currentProvider === "kaskad") root.loadBinds(false); }
+        function onVersionsChanged() { if (root.currentProvider === "kaskad") root.loadBinds(false); }
+    }
+
     function saveBind(originalKey, bindData) {
         if (readOnly) {
             showHyprlandReadOnlyWarning();
@@ -530,7 +557,16 @@ Singleton {
         if (!bindData.key || !Actions.isValidAction(bindData.action))
             return;
         if (currentProvider === "kaskad") {
-            const saved = Kaskad.setScreenshotShortcut(bindData.key);
+            const def = nativeShortcutDefinitions().find(item => item.action === bindData.action);
+            const original = originalKey ? nativeShortcutForKey(originalKey) : null;
+            // A native QAction owns its shortcut. Changing its action would
+            // otherwise leave the original binding behind.
+            const saved = !!def && (!originalKey || original?.action === def.action)
+                && writeNativeShortcut(def, bindData.key);
+            if (!saved)
+                nativeShortcutError();
+            else
+                lastError = "";
             bindSaveCompleted(saved);
             if (saved) {
                 _pendingSavedKey = bindData.key;
@@ -587,9 +623,12 @@ Singleton {
         if (!key)
             return;
         if (currentProvider === "kaskad") {
-            if (Kaskad.setScreenshotShortcut("")) {
+            const def = nativeShortcutForKey(key);
+            if (def && writeNativeShortcut(def, "")) {
                 bindRemoved(key);
                 loadBinds(false);
+            } else {
+                nativeShortcutError();
             }
             return;
         }
@@ -606,9 +645,12 @@ Singleton {
         if (!key)
             return;
         if (currentProvider === "kaskad") {
-            if (Kaskad.setScreenshotShortcut("Super+Shift+S")) {
+            const def = nativeShortcutForKey(key);
+            if (def && writeNativeShortcut(def, def.defaultKey)) {
                 bindRemoved(key);
                 loadBinds(false);
+            } else {
+                nativeShortcutError();
             }
             return;
         }
@@ -642,6 +684,8 @@ Singleton {
     }
 
     function getKaskadActions() {
+        if (currentProvider === "kaskad")
+            return nativeShortcutDefinitions().map(def => ({id: def.action, label: def.label}));
         return Actions.getKaskadActions(CompositorService.isNiri, CompositorService.isHyprland, CompositorService.isKaskad);
     }
 

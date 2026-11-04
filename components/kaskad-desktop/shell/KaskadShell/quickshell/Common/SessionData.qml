@@ -420,12 +420,27 @@ Singleton {
         _armDndExpireTimer();
     }
 
-    function saveSettings() {
+    property bool _lastSaveFailed: false
+    property bool _retryingSessionWrite: false
+
+    function saveSettings(waitForCompletion) {
         if (_parseError || !_hasLoaded)
-            return;
+            return false;
+        // Finish the queued write before reporting success to editors.
+        // blockWrites alone does not guarantee a completed write at setText().
+        if (waitForCompletion && _lastSaveFailed) {
+            _retryingSessionWrite = true;
+            settingsFile.reload();
+            settingsFile.waitForJob();
+            _retryingSessionWrite = false;
+        }
+        _lastSaveFailed = false;
         settingsFile.setText(getCurrentSessionJson());
+        if (waitForCompletion)
+            settingsFile.waitForJob();
         if (_isReadOnly)
             _checkSessionWritable();
+        return !_lastSaveFailed;
     }
 
     function set(key, value) {
@@ -2078,7 +2093,8 @@ Singleton {
 
     function setAppOverride(appId, overrides) {
         if (!appId)
-            return;
+            return false;
+        const previousOverrides = appOverrides;
         const newOverrides = Object.assign({}, appOverrides);
         if (!overrides || Object.keys(overrides).length === 0) {
             delete newOverrides[appId];
@@ -2086,7 +2102,11 @@ Singleton {
             newOverrides[appId] = overrides;
         }
         appOverrides = newOverrides;
-        saveSettings();
+        if (!saveSettings(true)) {
+            appOverrides = previousOverrides;
+            return false;
+        }
+        return true;
     }
 
     function getAppOverride(appId) {
@@ -2097,11 +2117,16 @@ Singleton {
 
     function clearAppOverride(appId) {
         if (!appId)
-            return;
+            return false;
+        const previousOverrides = appOverrides;
         const newOverrides = Object.assign({}, appOverrides);
         delete newOverrides[appId];
         appOverrides = newOverrides;
-        saveSettings();
+        if (!saveSettings(true)) {
+            appOverrides = previousOverrides;
+            return false;
+        }
+        return true;
     }
 
     function setSearchAppActions(enabled) {
@@ -2336,10 +2361,13 @@ Singleton {
         atomicWrites: true
         watchChanges: true
         onLoaded: {
+            if (root._retryingSessionWrite)
+                return;
             _hasUnsavedChanges = false;
             parseSettings(settingsFile.text());
         }
         onSaveFailed: error => {
+            root._lastSaveFailed = true;
             root._isReadOnly = true;
             root._hasUnsavedChanges = root._checkForUnsavedChanges();
         }

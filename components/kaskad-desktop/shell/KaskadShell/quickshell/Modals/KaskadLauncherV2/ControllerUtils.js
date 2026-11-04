@@ -1,5 +1,14 @@
 .pragma library
 
+// Keep legacy IPC and saved modes usable after retiring dedicated sections.
+function normalizeMode(mode) {
+    if (mode === "windows")
+        return "apps";
+    if (mode === "files")
+        return "all";
+    return mode || "apps";
+}
+
 function getFileIcon(filename) {
     var ext = filename.lastIndexOf(".") > 0 ? filename.substring(filename.lastIndexOf(".") + 1).toLowerCase() : "";
 

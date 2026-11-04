@@ -266,6 +266,20 @@ KaskadIpc::KaskadIpc(Workspace *workspace)
     }
     connect(m_screenshotAction, &QAction::triggered, this, &KaskadIpc::requestScreenshot);
 
+    // No new default bindings: preserve the user's existing launcher shortcuts.
+    for (const QString &kind : {QStringLiteral("default"), QStringLiteral("spotlight")}) {
+        auto *action = new QAction(this);
+        action->setProperty("componentName", QStringLiteral("kaskad"));
+        action->setObjectName(kind == QStringLiteral("default") ? QStringLiteral("KaskadLauncher") : QStringLiteral("KaskadSpotlightBar"));
+        action->setText(kind == QStringLiteral("default") ? QStringLiteral("Kaskad Launcher") : QStringLiteral("Kaskad Spotlight Bar"));
+        action->setAutoRepeat(false);
+        KGlobalAccel::self()->setGlobalShortcut(action, QList<QKeySequence>{});
+        m_launcherActions.insert(kind, action);
+        connect(action, &QAction::triggered, this, [this, kind]() {
+            Q_EMIT launcherRequested(kind);
+        });
+    }
+
     m_toggleHoveredBorderAction = new QAction(this);
     m_toggleHoveredBorderAction->setObjectName(QStringLiteral("KaskadToggleHoveredWindowBorder"));
     m_toggleHoveredBorderAction->setText(QStringLiteral("Toggle Border of Window Under Pointer"));
@@ -407,7 +421,7 @@ KaskadIpc::~KaskadIpc()
 
 uint KaskadIpc::protocolVersion() const
 {
-    return 26;
+    return 27;
 }
 
 void KaskadIpc::scheduleTopologyChanged()
@@ -1136,6 +1150,43 @@ bool KaskadIpc::moveWindowToWorkspace(const QString &windowId, const QString &wo
 void KaskadIpc::requestOverview(const QString &reason)
 {
     Q_EMIT overviewRequested(reason);
+}
+
+QString KaskadIpc::launcherShortcut(const QString &kind) const
+{
+    const auto *action = m_launcherActions.value(kind);
+    if (!action) {
+        return {};
+    }
+    const auto sequences = KGlobalAccel::self()->shortcut(action);
+    return sequences.isEmpty() ? QString() : sequences.constFirst().toString(QKeySequence::PortableText).replace(QStringLiteral("Meta"), QStringLiteral("Super"));
+}
+
+bool KaskadIpc::setLauncherShortcut(const QString &kind, const QString &shortcut)
+{
+    auto *action = m_launcherActions.value(kind);
+    if (!action) {
+        return false;
+    }
+    QString portable = shortcut.trimmed();
+    portable.replace(QStringLiteral("Super"), QStringLiteral("Meta"), Qt::CaseInsensitive);
+    const auto sequence = QKeySequence::fromString(portable, QKeySequence::PortableText);
+    if (!portable.isEmpty() && (sequence.isEmpty() || sequence.count() != 1
+        || sequence[0].key() == Qt::Key_unknown
+        || (sequence[0].key() >= Qt::Key_Shift && sequence[0].key() <= Qt::Key_Meta))) {
+        return false;
+    }
+    const auto previous = KGlobalAccel::self()->shortcut(action);
+    if (!sequence.isEmpty() && !previous.contains(sequence)
+        && !KGlobalAccel::isGlobalShortcutAvailable(sequence)) {
+        return false;
+    }
+    const QList<QKeySequence> desired = sequence.isEmpty() ? QList<QKeySequence>{} : QList<QKeySequence>{sequence};
+    if (!KGlobalAccel::self()->setShortcut(action, desired, KGlobalAccel::NoAutoloading)) {
+        return false;
+    }
+    Q_EMIT launcherShortcutsChanged();
+    return true;
 }
 
 QString KaskadIpc::screenshotShortcut() const

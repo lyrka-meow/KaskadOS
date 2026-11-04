@@ -72,6 +72,8 @@ public:
     Q_INVOKABLE bool resetKeyboardLayoutShortcut();
     Q_INVOKABLE bool submitScreenCastSelection(const QString &requestId, const QString &kind, const QString &id, bool allowRestore = true);
     Q_INVOKABLE bool cancelScreenCastSelection(const QString &requestId);
+    Q_INVOKABLE QString launcherShortcut(const QString &kind) const;
+    Q_INVOKABLE bool setLauncherShortcut(const QString &kind, const QString &shortcut);
     Q_INVOKABLE bool setScreenshotShortcut(const QString &shortcut);
     Q_INVOKABLE bool setScreenshotProfiles(const QVariantList &profiles);
     Q_INVOKABLE bool setMicrophoneShortcut(const QString &shortcut);
@@ -103,6 +105,8 @@ Q_SIGNALS:
     void screenCastSelectionRequested(const QString &requestId, const QString &title, const QString &optionsJson);
     void screenshotRequested();
     void screenshotProfileRequested(const QString &profileId);
+    void launcherRequested(const QString &kind);
+    void launcherShortcutsChanged();
     void screenshotShortcutChanged();
     void microphoneShortcutChanged();
     void microphoneShortcutKeyChanged(bool pressed);
