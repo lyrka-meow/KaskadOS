@@ -283,11 +283,11 @@ cd /home/ll/KaskadOS
 ```bash
 cd /home/ll/KaskadOS
 mkdir -p out/repository/x86_64
-rsync -a -e 'ssh -i /home/ll/.ssh/kaskados-repository -o IdentitiesOnly=yes' kaskados-repo@2.26.103.171:/srv/kaskados-repo/x86_64/ out/repository/x86_64/ && \
+rsync -a -e 'ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no' kaskados-repo@2.26.103.171:/srv/kaskados-repo/x86_64/ out/repository/x86_64/ && \
 KASKADOS_SIGNING_KEY=EF7A10FA1736CE6886F95039A20367BE919C7E45 ./scripts/publish-repository.sh out/packages/x86_64/*.pkg.tar.zst
 ```
 
-Предварительное скачивание обязательно для новой рабочей папки: publisher использует `rsync --delete-delay`, поэтому неполное локальное зеркало может удалить другие пакеты на сервере. Команда использует имеющийся локальный ключ подписи KaskadOS Package Signing и штатный SSH-ключ. Не запускать публикацию одновременно из нескольких рабочих копий.
+Предварительное скачивание обязательно для новой рабочей папки: publisher использует `rsync --delete-delay`, поэтому неполное локальное зеркало может удалить другие пакеты на сервере. Команда использует локальный GPG-ключ подписи KaskadOS Package Signing, а SSH-доступ выполняется только по паролю. Не запускать публикацию одновременно из нескольких рабочих копий.
 
 
 ### Исправление регрессии запуска после установки alpha.79

@@ -6,7 +6,7 @@ readonly PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 readonly REPOSITORY_DIR="${KASKADOS_REPOSITORY_DIR:-${PROJECT_DIR}/out/repository/x86_64}"
 readonly REPOSITORY_DB="${REPOSITORY_DIR}/kaskados.db.tar.gz"
 readonly REPOSITORY_TARGET="${KASKADOS_REPOSITORY_TARGET:-kaskados-repo@2.26.103.171:/srv/kaskados-repo/x86_64/}"
-readonly SSH_KEY="${KASKADOS_REPOSITORY_SSH_KEY:-${HOME}/.ssh/kaskados-repository}"
+readonly SSH_COMMAND="ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no"
 
 die() {
   printf 'Ошибка: %s\n' "$*" >&2
@@ -22,7 +22,6 @@ for command_name in gpg repo-add rsync ssh; do
     || die "не найдена команда ${command_name}"
 done
 
-[[ -f "${SSH_KEY}" ]] || die "не найден SSH-ключ ${SSH_KEY}"
 mkdir -p -- "${REPOSITORY_DIR}"
 
 declare -a packages=()
@@ -54,7 +53,7 @@ rsync \
   --archive \
   --delete-delay \
   --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
-  --rsh="ssh -i ${SSH_KEY} -o IdentitiesOnly=yes" \
+  --rsh="${SSH_COMMAND}" \
   "${REPOSITORY_DIR}/" \
   "${REPOSITORY_TARGET}"
 
