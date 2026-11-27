@@ -18,7 +18,7 @@ ShellRoot {
     id: entrypoint
 
     readonly property bool disableHotReload: Quickshell.env("KASKAD_DISABLE_HOT_RELOAD") === "1" || Quickshell.env("KASKAD_DISABLE_HOT_RELOAD") === "true"
-    readonly property color decorationActiveSurface: Theme.blend(Theme.surfaceContainer, Theme.primary, 0.05)
+    readonly property color decorationActiveSurface: Theme.isLightMode ? Theme.blend(Theme.surfaceContainer, Theme.primary, 0.05) : Theme.surfaceContainer
     readonly property string decorationPaletteSignature: [
         decorationActiveSurface,
         Theme.surfaceContainer,

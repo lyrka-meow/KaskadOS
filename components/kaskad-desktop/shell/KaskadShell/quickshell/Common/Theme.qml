@@ -441,7 +441,7 @@ Singleton {
         return cur || fallback;
     }
 
-    readonly property var currentThemeData: {
+    readonly property var sourceThemeData: {
         if (currentTheme === "custom") {
             return customThemeData || StockThemes.getThemeByName("kaskados", isLightMode);
         } else if (currentTheme === dynamic) {
@@ -476,6 +476,41 @@ Singleton {
             return StockThemes.getThemeByName(currentTheme, isLightMode);
         }
     }
+
+    // Serpantinum Titanium, commit 320fece13b69451e8e46e2285c1574dd2c0ad1de.
+    // Background roles only; keep the selected Kaskad accent. See DARK_PALETTE.md.
+    readonly property var serpantinumSurfaces: ({
+        crust: "#08090a",
+        text: "#f0f2f5",
+        base: "#141619",
+        surface2: "#434a54",
+        subtext0: "#b3b9c2",
+        overlay0: "#636c7a",
+        mantle: "#0e0f11",
+        surface0: "#22262b",
+        surface1: "#32373e"
+    })
+
+    readonly property var darkChromePalette: ({
+        background: serpantinumSurfaces.crust,
+        backgroundText: serpantinumSurfaces.text,
+        surface: serpantinumSurfaces.base,
+        surfaceText: serpantinumSurfaces.text,
+        surfaceVariant: serpantinumSurfaces.surface2,
+        surfaceVariantText: serpantinumSurfaces.subtext0,
+        outline: serpantinumSurfaces.overlay0,
+        outlineVariant: serpantinumSurfaces.surface2,
+        surfaceContainerLowest: serpantinumSurfaces.crust,
+        surfaceContainerLow: serpantinumSurfaces.mantle,
+        surfaceContainer: serpantinumSurfaces.base,
+        surfaceContainerHigh: serpantinumSurfaces.surface0,
+        surfaceContainerHighest: serpantinumSurfaces.surface1,
+        surfaceBright: serpantinumSurfaces.surface2,
+        surfaceDim: serpantinumSurfaces.crust
+    })
+
+    readonly property var currentThemeData: isLightMode
+        ? sourceThemeData : Object.assign({}, sourceThemeData, darkChromePalette)
 
     readonly property var availableMatugenSchemes: [({
                 "value": "scheme-tonal-spot",
@@ -669,7 +704,8 @@ Singleton {
         case "sc":
             return surfaceContainer;
         case "sch":
-            return surfaceContainerHigh;
+            // Match Serpantinum BarModule pill contrast against the base.
+            return isLightMode ? surfaceContainerHigh : Qt.darker(serpantinumSurfaces.surface0, 1.15);
         case "schh":
             return surfaceContainerHighest;
         case "sth":
@@ -1534,7 +1570,8 @@ Singleton {
         case "sc":
             return surfaceContainer;
         case "sch":
-            return surfaceContainerHigh;
+            // Match Serpantinum BarModule pill contrast against the base.
+            return isLightMode ? surfaceContainerHigh : Qt.darker(serpantinumSurfaces.surface0, 1.15);
         case "primaryContainer":
             return primaryContainer;
         case "secondaryContainer":
